@@ -197,7 +197,7 @@
     prog.append(fill);
 
     const seg = el('div', 'mz-seg');
-    for (const [mode, label] of [['pct', 'הנחה גדולה'], ['new', 'חדשות']]) {
+    for (const [mode, label] of [['score', 'הכי משתלם'], ['pct', 'הנחה גדולה'], ['new', 'חדשות']]) {
       const b = el('button', null, label);
       b.dataset.mode = mode;
       b.addEventListener('click', () => { panel.sort = mode; renderPanel(); });
@@ -226,7 +226,7 @@
     root.append(head, prog, seg, fl, list, foot);
     document.body.append(root);
     Object.assign(panel, { root, count, dot, status, fill, prog, list, more });
-    panel.sort = panel.sort || 'pct';
+    panel.sort = panel.sort || 'score';
     syncSelects();
   }
 
@@ -244,7 +244,7 @@
     if (text) panel.status.textContent = text;
   }
 
-  function buildRow(token, i) {
+  function buildRow(token, i, isTop) {
     const row = el('div', `mz-row mz-${tone(i)}`);
     const h = headline(i);
     const pill = el('div', 'mz-pill');
@@ -263,6 +263,7 @@
     // תגיות רק למה שצריך לבלוט
     const tags = el('div', 'mz-tags');
     const tag = (text, cls) => tags.append(el('span', `mz-tag${cls ? ' ' + cls : ''}`, text));
+    if (isTop) tag('★ הכי משתלם', 'mz-tag-top');
     if (i.fresh && h.src !== 'fresh') tag('חדש', 'mz-tag-new');
     if (i.kmFlag === 'high') tag('ק״מ גבוה', 'mz-tag-warn');
     if (h.src === 'list' && i.mp != null && Math.abs(i.mp) >= MIN_SHOW) {
@@ -285,6 +286,8 @@
     if (i.km) tip.push(`${nf.format(i.km)} ק״מ${i.kmVerified ? ', מאומת במשרד התחבורה' : ''}`);
     const d = M.formatDate(i.createdAt);
     if (d) tip.push(`פורסם ${d}`);
+    const sc = M.dealScore(i, Date.now());
+    if (sc != null) tip.push(`ציון משתלמות: ${sc} (הנחה, מתוקנת לפי ק״מ ויד)`);
     row.title = tip.join('\n');
 
     row.append(pill, main, open);
@@ -302,9 +305,13 @@
     ensurePanel();
     const rows = [...state.decor.entries()].filter(([, i]) => passes(i));
     const mins = (i) => (i.minutes == null ? Infinity : i.minutes);
-    rows.sort(([, a], [, b]) => panel.sort === 'new' ? mins(a) - mins(b) : (bestPct(b) ?? -1) - (bestPct(a) ?? -1));
+    const now = Date.now();
+    const score = (i) => M.dealScore(i, now) ?? -Infinity;
+    rows.sort(([, a], [, b]) => panel.sort === 'new' ? mins(a) - mins(b)
+      : panel.sort === 'score' ? score(b) - score(a)
+        : (bestPct(b) ?? -1) - (bestPct(a) ?? -1));
     for (const b of panel.root.querySelectorAll('.mz-seg button')) b.classList.toggle('on', b.dataset.mode === panel.sort);
-    panel.list.replaceChildren(...rows.map(([t, i]) => buildRow(t, i)));
+    panel.list.replaceChildren(...rows.map(([t, i], n) => buildRow(t, i, panel.sort === 'score' && n === 0 && score(i) > -Infinity)));
     if (!rows.length) {
       const e = el('div', 'mz-empty', state.running ? 'מחפש מציאות…' : 'אין כרגע מודעות שעומדות בסינון');
       panel.list.append(e);

@@ -110,3 +110,14 @@ test('extractPagination', () => {
   assert.deepStrictEqual(M.extractPagination(d), { pages: 7, total: 270, perPage: 40 });
   assert.strictEqual(M.extractPagination({}), null);
 });
+
+test('dealScore מעדיף הנחה עם ק״מ סביר על הנחה גדולה עם ק״מ גבוה', () => {
+  const now = Date.parse('2026-10-22T12:00:00');
+  const highKm = M.dealScore({ pct: 21.8, km: 192000, year: 2019, hand: 3 }, now);
+  const okKm = M.dealScore({ pct: 23.2, km: 130000, year: 2019, hand: 2 }, now);
+  const noKm = M.dealScore({ pct: 15, year: 2019, hand: 1 }, now);
+  assert.ok(okKm > highKm, `${okKm} > ${highKm}`);
+  assert.strictEqual(noKm, 15);
+  assert.strictEqual(M.dealScore({ year: 2019 }, now), null);
+  assert.ok(M.dealScore({ pct: 12, km: 40000, year: 2019, hand: 1 }, now) > 12);
+});

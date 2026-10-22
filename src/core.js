@@ -84,6 +84,21 @@
     return Number.isNaN(t) ? null : (now - t) / 60000;
   }
 
+  // ציון "הכי משתלם": ההנחה הטובה מבין מחירון/שוק, מתוקנת לפי ק"מ ויד.
+  // ק"מ כפול מהצפוי מוריד 20 נקודות, חצי מהצפוי מוסיף 10. כל יד מעל הראשונה מורידה 1.5.
+  // המשקלות הם הערכה לכיוונון, לא נוסחה מבוססת.
+  function dealScore(i, now) {
+    const best = Math.max(i.pct == null ? -Infinity : i.pct, i.mp == null ? -Infinity : i.mp);
+    if (best === -Infinity) return null;
+    let s = best;
+    if (i.km > 0 && i.year) {
+      const r = Math.min(2.5, Math.max(0.3, i.km / expectedKm(i.year, now)));
+      s += 20 * (1 - r);
+    }
+    if (i.hand > 1) s -= 1.5 * (i.hand - 1);
+    return Math.round(s * 10) / 10;
+  }
+
   function formatAge(minutes) {
     if (minutes == null) return null;
     if (minutes < 60) return `לפני ${Math.max(1, Math.round(minutes))} דק׳`;
@@ -141,7 +156,7 @@
 
   const api = {
     parseNextDataFromHtml, extractAds, extractItem, extractListPrice,
-    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate, median, marketStats, extractPagination,
+    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate, median, marketStats, extractPagination, dealScore,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Metzion = api;

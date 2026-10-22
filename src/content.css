@@ -69,6 +69,7 @@
 .mz-tag { padding: 1px 7px; border-radius: 999px; background: var(--mz-soft); color: var(--mz-sub); font-size: 11px; }
 .mz-tag-warn { background: #fdeedf; color: var(--mz-warn); font-weight: 600; }
 .mz-tag-good { background: #e3f4ea; color: var(--mz-strong); font-weight: 600; }
+.mz-tag-top { background: #fff4cc; color: #8a6100; font-weight: 700; }
 .mz-tag-new { background: #e6edfd; color: var(--mz-new); font-weight: 600; }
 
 .mz-open { position: absolute; top: 8px; left: 8px; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; color: var(--mz-sub) !important; text-decoration: none !important; font-size: 13px; opacity: 0; transition: opacity .15s; }
