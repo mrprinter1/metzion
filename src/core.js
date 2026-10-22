@@ -84,6 +84,23 @@
     return Number.isNaN(t) ? null : (now - t) / 60000;
   }
 
+  function formatAge(minutes) {
+    if (minutes == null) return null;
+    if (minutes < 60) return `לפני ${Math.max(1, Math.round(minutes))} דק׳`;
+    if (minutes < 1440) {
+      const h = Math.round(minutes / 60);
+      return h === 1 ? 'לפני שעה' : h === 2 ? 'לפני שעתיים' : `לפני ${h} שעות`;
+    }
+    const d = Math.round(minutes / 1440);
+    return d === 1 ? 'לפני יום' : d === 2 ? 'לפני יומיים' : `לפני ${d} ימים`;
+  }
+
+  // "2026-10-20T17:16:37" -> "20/10"
+  function formatDate(iso) {
+    const m = /^\d{4}-(\d{2})-(\d{2})/.exec(iso || '');
+    return m ? `${m[2]}/${m[1]}` : null;
+  }
+
   // ה-__NEXT_DATA__ בדף לא מתעדכן בניווט פנימי, לכן בודקים שהוא תואם לכתובת.
   function pageMatchesUrl(data, search) {
     const q = (data && data.query) || {};
@@ -97,7 +114,7 @@
 
   const api = {
     parseNextDataFromHtml, extractAds, extractItem, extractListPrice,
-    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl,
+    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Metzion = api;

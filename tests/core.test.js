@@ -78,3 +78,14 @@ test('minutesSince', () => {
   assert.strictEqual(M.minutesSince('2026-10-22T12:00:00', now), 30);
   assert.strictEqual(M.minutesSince('לא תאריך', now), null);
 });
+
+test('formatAge ו-formatDate', () => {
+  assert.strictEqual(M.formatAge(5), 'לפני 5 דק׳');
+  assert.strictEqual(M.formatAge(60), 'לפני שעה');
+  assert.strictEqual(M.formatAge(180), 'לפני 3 שעות');
+  assert.strictEqual(M.formatAge(1440), 'לפני יום');
+  assert.strictEqual(M.formatAge(60 * 24 * 4), 'לפני 4 ימים');
+  assert.strictEqual(M.formatAge(null), null);
+  assert.strictEqual(M.formatDate('2026-10-20T17:16:37'), '20/10');
+  assert.strictEqual(M.formatDate(undefined), null);
+});

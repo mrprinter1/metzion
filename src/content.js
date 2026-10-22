@@ -5,7 +5,7 @@
   const MIN_SHOW = 10;       // מאיזה אחוז מתחת למחירון מופיעה מודעה ברשימה ובתגית
   const KM_THRESHOLD = 10;   // רק מועמדות כאלה מקבלות בקשה לדף המודעה (בשביל הק"מ)
   const FRESH_MIN = 60;      // "עלתה לאחרונה" = עד שעה
-  const MAX_LOOKUPS = 30;    // מקסימום שילובי תת-דגם ושנה בעמוד אחד
+  const MAX_LOOKUPS = 45;    // מקסימום שילובי תת-דגם ושנה בעמוד אחד
   const GAP_MS = 400;        // מרווח מינימלי בין בקשות, כדי לא להעמיס
   const TTL = 24 * 3600e3;
   const NEG_TTL = 3 * 3600e3;
@@ -16,6 +16,7 @@
 
   const panel = { root: null, status: null, list: null };
   let sortMode = 'pct';
+  let hideHigh = false;
   function ensurePanel() {
     if (panel.root && panel.root.isConnected) return;
     const root = document.createElement('div');
@@ -40,6 +41,11 @@
       b.addEventListener('click', () => { sortMode = mode; renderPanel(); });
       bar.append(b);
     }
+    const hb = document.createElement('button');
+    hb.textContent = 'בלי ק״מ גבוה';
+    hb.dataset.hide = '1';
+    hb.addEventListener('click', () => { hideHigh = !hideHigh; renderPanel(); });
+    bar.append(hb);
     const list = document.createElement('div');
     list.className = 'metzion-list';
     root.append(head, bar, list);
@@ -60,7 +66,8 @@
     l2.className = 'metzion-l2';
     const parts = [i.year, i.hand ? `יד ${i.hand}` : null];
     if (i.km) parts.push(`${nf.format(i.km)} ק״מ${i.kmVerified ? ' ✓' : ''}${KM_TEXT[i.kmFlag] ? ' (' + KM_TEXT[i.kmFlag] + ')' : ''}`);
-    if (i.fresh) parts.push(`לפני ${Math.max(1, Math.round(i.minutes))} דק׳`);
+    const pub = publishedText(i);
+    if (pub) parts.push(pub);
     l2.textContent = parts.filter(Boolean).join(' · ');
     const open = document.createElement('a');
     open.href = `/vehicles/item/${token}`;
@@ -81,10 +88,10 @@
 
   function renderPanel() {
     ensurePanel();
-    const rows = [...state.decor.entries()].filter(([, i]) => (i.pct != null && i.pct >= MIN_SHOW) || i.fresh);
+    const rows = [...state.decor.entries()].filter(([, i]) => ((i.pct != null && i.pct >= MIN_SHOW) || i.fresh) && !(hideHigh && i.kmFlag === 'high'));
     const mins = (i) => (i.minutes == null ? Infinity : i.minutes);
     rows.sort(([, a], [, b]) => sortMode === 'new' ? mins(a) - mins(b) : (b.pct ?? -1) - (a.pct ?? -1));
-    for (const b of panel.root.querySelectorAll('.metzion-bar button')) b.classList.toggle('on', b.dataset.mode === sortMode);
+    for (const b of panel.root.querySelectorAll('.metzion-bar button')) b.classList.toggle('on', b.dataset.hide ? hideHigh : b.dataset.mode === sortMode);
     panel.list.replaceChildren(...rows.map(([t, i]) => buildRow(t, i)));
     if (!rows.length) {
       const e = document.createElement('div');
@@ -188,6 +195,13 @@
   const nf = new Intl.NumberFormat('he-IL');
   const KM_TEXT = { high: 'ק״מ גבוה', low: 'ק״מ נמוך', normal: '' };
 
+  function publishedText(i) {
+    const age = M.formatAge(i.minutes);
+    if (!age) return null;
+    const d = M.formatDate(i.createdAt);
+    return `פורסם ${age}${d ? ' (' + d + ')' : ''}`;
+  }
+
   function buildBadge(info) {
     const b = document.createElement('div');
     b.className = 'metzion-badge';
@@ -195,15 +209,15 @@
     if (info.fresh) b.classList.add('metzion-fresh');
     const lines = [];
     if (info.pct != null && info.pct >= MIN_SHOW) {
-      b.classList.add(info.pct >= 15 ? 'metzion-strong' : info.pct >= KM_THRESHOLD ? 'metzion-good' : 'metzion-mild');
+      b.classList.add(info.kmFlag === 'high' ? 'metzion-orange' : info.pct >= 15 ? 'metzion-strong' : info.pct >= KM_THRESHOLD ? 'metzion-good' : 'metzion-mild');
       lines.push(`${info.pct}% מתחת למחירון`);
     }
     if (info.km) {
       const f = KM_TEXT[info.kmFlag] || '';
       lines.push(`${nf.format(info.km)} ק״מ${f ? ' · ' + f : ''}${info.kmVerified ? ' ✓' : ''}`);
-      if (info.kmFlag === 'high') b.classList.add('metzion-warn');
     }
-    if (info.fresh) lines.push(`עלתה לפני ${Math.max(1, Math.round(info.minutes))} דק׳`);
+    const pub = publishedText(info);
+    if (pub) lines.push(pub);
     for (const t of lines) { const s = document.createElement('div'); s.textContent = t; b.append(s); }
     if (info.listPrice) b.title = `מחירון יד 2: ${nf.format(info.listPrice)} ₪`;
     return b;
@@ -248,7 +262,7 @@
       for (const ad of ads) {
         const minutes = M.minutesSince(ad.createdAt, now);
         const fresh = minutes != null && minutes >= 0 && minutes <= FRESH_MIN;
-        if (fresh) state.decor.set(ad.token, { v: 1, fresh: true, minutes, pct: null, price: ad.price, year: ad.year, hand: ad.hand });
+        if (fresh) state.decor.set(ad.token, { v: 1, fresh: true, minutes, pct: null, price: ad.price, year: ad.year, hand: ad.hand, createdAt: ad.createdAt });
         if (!ad.price || !ad.subModelId || !ad.year) continue;
         const k = `${ad.subModelId}/${ad.year}`;
         if (lookups.size >= MAX_LOOKUPS && !lookups.has(k)) continue;
@@ -268,7 +282,7 @@
         const lp = lookups.get(c.k);
         const pct = M.discountPct(lp, c.ad.price);
         if (pct == null || (pct < MIN_SHOW && !c.fresh)) continue;
-        const info = { v: 1, fresh: c.fresh, minutes: c.minutes, pct, listPrice: lp, year: c.ad.year, price: c.ad.price, hand: c.ad.hand };
+        const info = { v: 1, fresh: c.fresh, minutes: c.minutes, pct, listPrice: lp, year: c.ad.year, price: c.ad.price, hand: c.ad.hand, createdAt: c.ad.createdAt };
         state.decor.set(c.ad.token, info);
         if (pct >= KM_THRESHOLD) bargains.push(c.ad.token);
       }
