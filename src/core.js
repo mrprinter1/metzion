@@ -101,6 +101,33 @@
     return m ? `${m[2]}/${m[1]}` : null;
   }
 
+  function median(nums) {
+    if (!nums.length) return null;
+    const a = [...nums].sort((x, y) => x - y);
+    const m = a.length >> 1;
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  }
+
+  // חציון מחירים לכל תת-דגם ושנה בין המודעות שנסרקו. דורש לפחות minN מודעות.
+  function marketStats(ads, minN) {
+    const groups = new Map();
+    for (const ad of ads) {
+      if (!(ad.price > 0) || !ad.subModelId || !ad.year) continue;
+      const k = `${ad.subModelId}/${ad.year}`;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(ad.price);
+    }
+    const out = new Map();
+    for (const [k, v] of groups) if (v.length >= (minN || 3)) out.set(k, { median: median(v), n: v.length });
+    return out;
+  }
+
+  function extractPagination(data) {
+    const q = findQuery(data, 'feed-mix');
+    const p = q && q.state && q.state.data && q.state.data.pagination;
+    return p ? { pages: p.pages || 1, total: p.total || 0, perPage: p.perPage || 0 } : null;
+  }
+
   // ה-__NEXT_DATA__ בדף לא מתעדכן בניווט פנימי, לכן בודקים שהוא תואם לכתובת.
   function pageMatchesUrl(data, search) {
     const q = (data && data.query) || {};
@@ -114,7 +141,7 @@
 
   const api = {
     parseNextDataFromHtml, extractAds, extractItem, extractListPrice,
-    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate,
+    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate, median, marketStats, extractPagination,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Metzion = api;

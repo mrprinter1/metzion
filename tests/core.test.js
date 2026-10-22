@@ -89,3 +89,24 @@ test('formatAge ו-formatDate', () => {
   assert.strictEqual(M.formatDate('2026-10-20T17:16:37'), '20/10');
   assert.strictEqual(M.formatDate(undefined), null);
 });
+
+test('median ו-marketStats', () => {
+  assert.strictEqual(M.median([3, 1, 2]), 2);
+  assert.strictEqual(M.median([4, 1, 2, 3]), 2.5);
+  assert.strictEqual(M.median([]), null);
+  const ads = [
+    { price: 90000, subModelId: 1, year: 2019 }, { price: 80000, subModelId: 1, year: 2019 },
+    { price: 100000, subModelId: 1, year: 2019 }, { price: 0, subModelId: 1, year: 2019 },
+    { price: 50000, subModelId: 2, year: 2019 }, { price: 60000, subModelId: 2, year: 2019 },
+  ];
+  const m = M.marketStats(ads);
+  assert.deepStrictEqual(m.get('1/2019'), { median: 90000, n: 3 });
+  assert.strictEqual(m.has('2/2019'), false);
+});
+
+test('extractPagination', () => {
+  const d = { props: { pageProps: { dehydratedState: { queries: [
+    { queryKey: ['feed-mix'], state: { data: { pagination: { pages: 7, perPage: 40, total: 270 } } } }] } } } };
+  assert.deepStrictEqual(M.extractPagination(d), { pages: 7, total: 270, perPage: 40 });
+  assert.strictEqual(M.extractPagination({}), null);
+});
