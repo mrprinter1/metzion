@@ -113,20 +113,33 @@
 
   // ---------- תצוגה ----------
   const nf = new Intl.NumberFormat('he-IL');
-  const KM_TEXT = { high: 'ק״מ גבוה', low: 'ק״מ נמוך', normal: '' };
+  const DEFAULT_FILTERS = { minPct: MIN_SHOW, maxKm: 0, maxHand: 0, seller: 'all' };
   const panel = {};
 
+  const el = (tag, cls, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  };
   const bestPct = (i) => {
     const v = Math.max(i.pct == null ? -Infinity : i.pct, i.mp == null ? -Infinity : i.mp);
     return v === -Infinity ? null : v;
   };
-  const below = (p) => `${Math.abs(p)}% ${p >= 0 ? 'מתחת' : 'מעל'}`;
+  const kmShort = (km) => (km >= 1000 ? `${nf.format(Math.round(km / 1000))} אלף ק״מ` : `${nf.format(km)} ק״מ`);
+  const signPct = (p) => `${p >= 0 ? '−' : '+'}${Math.abs(p)}%`;
 
-  function publishedText(i) {
-    const age = M.formatAge(i.minutes);
-    if (!age) return null;
-    const d = M.formatDate(i.createdAt);
-    return `פורסם ${age}${d ? ' (' + d + ')' : ''}`;
+  // מה מוצג כ"כותרת" של המודעה: הנחה מהמחירון, ואם אין, הנחה מהשוק.
+  function headline(i) {
+    if (i.pct != null && i.pct >= MIN_SHOW) return { value: `${i.pct}%`, label: 'מתחת למחירון', src: 'list' };
+    if (i.mp != null && i.mp >= MIN_SHOW) return { value: `${i.mp}%`, label: 'מתחת לשוק', src: 'market' };
+    return { value: 'חדש', label: M.formatAge(i.minutes) || '', src: 'fresh' };
+  }
+  function tone(i) {
+    const best = bestPct(i);
+    if (!(best >= MIN_SHOW)) return 'fresh';
+    if (i.kmFlag === 'high') return 'warn';
+    return best >= 20 ? 'strong' : 'good';
   }
 
   function passes(i) {
@@ -137,81 +150,91 @@
     if (filters.seller !== 'all' && i.adType && i.adType !== filters.seller) return false;
     return true;
   }
+  const activeFilters = () => Object.keys(DEFAULT_FILTERS).filter((k) => filters[k] !== DEFAULT_FILTERS[k]).length;
+
+  function saveFilters() { chrome.storage.local.set({ filters }); render(); }
 
   function mkSelect(label, key, options) {
-    const wrap = document.createElement('label');
-    wrap.textContent = label;
-    const sel = document.createElement('select');
-    for (const [v, t] of options) { const o = document.createElement('option'); o.value = String(v); o.textContent = t; sel.append(o); }
+    const wrap = el('label', 'mz-field');
+    wrap.append(el('span', null, label));
+    const sel = el('select');
+    for (const [v, t] of options) { const o = el('option', null, t); o.value = String(v); sel.append(o); }
     sel.addEventListener('change', () => {
       filters[key] = key === 'seller' ? sel.value : Number(sel.value);
-      chrome.storage.local.set({ filters });
-      renderPanel();
+      saveFilters();
     });
     panel.selects[key] = sel;
     wrap.append(sel);
     return wrap;
   }
+  function syncSelects() {
+    if (!panel.selects) return;
+    for (const [k, sel] of Object.entries(panel.selects)) sel.value = String(filters[k]);
+  }
 
   function ensurePanel() {
     if (panel.root && panel.root.isConnected) return;
     panel.selects = {};
-    const root = document.createElement('div');
-    root.className = 'metzion-panel';
-    const head = document.createElement('div');
-    head.className = 'metzion-head';
-    const title = document.createElement('strong');
-    title.textContent = 'מציאון';
-    const status = document.createElement('span');
-    status.className = 'metzion-st';
-    const toggle = document.createElement('button');
-    toggle.textContent = '–';
-    toggle.title = 'צמצום והרחבה';
-    toggle.addEventListener('click', () => root.classList.toggle('metzion-collapsed'));
-    head.append(title, status, toggle);
+    const root = el('div', 'mz-panel');
+    root.dir = 'rtl';
 
-    const prog = document.createElement('div');
-    prog.className = 'metzion-progress';
-    const fill = document.createElement('i');
+    const head = el('div', 'mz-head');
+    const brand = el('div', 'mz-brand');
+    brand.append(el('span', 'mz-logo'), el('strong', null, 'מציאון'));
+    const count = el('span', 'mz-count', '0');
+    const spacer = el('span', 'mz-spacer');
+    const filterBtn = el('button', 'mz-btn mz-filter-btn', 'סינון');
+    const dot = el('span', 'mz-dot');
+    filterBtn.append(dot);
+    filterBtn.addEventListener('click', () => root.classList.toggle('mz-open-filters'));
+    const collapse = el('button', 'mz-icon', '–');
+    collapse.title = 'צמצום והרחבה';
+    collapse.addEventListener('click', () => root.classList.toggle('mz-collapsed'));
+    head.append(brand, count, spacer, filterBtn, collapse);
+
+    const prog = el('div', 'mz-progress');
+    const fill = el('i');
     prog.append(fill);
 
-    const bar = document.createElement('div');
-    bar.className = 'metzion-bar';
-    for (const [mode, label] of [['pct', 'לפי הנחה'], ['new', 'הכי חדשות']]) {
-      const b = document.createElement('button');
-      b.textContent = label;
+    const seg = el('div', 'mz-seg');
+    for (const [mode, label] of [['pct', 'הנחה גדולה'], ['new', 'חדשות']]) {
+      const b = el('button', null, label);
       b.dataset.mode = mode;
       b.addEventListener('click', () => { panel.sort = mode; renderPanel(); });
-      bar.append(b);
+      seg.append(b);
     }
 
-    const fl = document.createElement('div');
-    fl.className = 'metzion-filters';
-    fl.append(
+    const fl = el('div', 'mz-filters');
+    const grid = el('div', 'mz-grid');
+    grid.append(
       mkSelect('הנחה מינימלית', 'minPct', [[10, '10%'], [15, '15%'], [20, '20%'], [25, '25%']]),
-      mkSelect('ק״מ מקסימלי', 'maxKm', [[0, 'הכול'], [80000, '80 אלף'], [120000, '120 אלף'], [160000, '160 אלף'], [200000, '200 אלף']]),
+      mkSelect('ק״מ עד', 'maxKm', [[0, 'הכול'], [80000, '80 אלף'], [120000, '120 אלף'], [160000, '160 אלף'], [200000, '200 אלף']]),
       mkSelect('יד', 'maxHand', [[0, 'הכול'], [1, 'יד 1'], [2, 'עד יד 2'], [3, 'עד יד 3']]),
       mkSelect('מוכר', 'seller', [['all', 'הכול'], ['private', 'פרטי'], ['commercial', 'סוחר']]),
     );
+    const reset = el('button', 'mz-link', 'איפוס סינון');
+    reset.addEventListener('click', () => { Object.assign(filters, DEFAULT_FILTERS); syncSelects(); saveFilters(); });
+    fl.append(grid, reset);
 
-    const list = document.createElement('div');
-    list.className = 'metzion-list';
-    const more = document.createElement('button');
-    more.className = 'metzion-more';
+    const list = el('div', 'mz-list');
+    const foot = el('div', 'mz-foot');
+    const status = el('span', 'mz-status');
+    const more = el('button', 'mz-btn mz-more');
     more.addEventListener('click', () => scanMore());
+    foot.append(status, more);
 
-    root.append(head, prog, bar, fl, list, more);
+    root.append(head, prog, seg, fl, list, foot);
     document.body.append(root);
-    Object.assign(panel, { root, status, fill, prog, list, more });
+    Object.assign(panel, { root, count, dot, status, fill, prog, list, more });
     panel.sort = panel.sort || 'pct';
-    for (const [k, sel] of Object.entries(panel.selects)) sel.value = String(filters[k]);
+    syncSelects();
   }
 
   function setStatus(text) { ensurePanel(); panel.status.textContent = text; }
   function setProgress(frac, text) {
     ensurePanel();
     panel.prog.classList.add('on');
-    panel.fill.style.width = `${Math.max(2, Math.min(100, Math.round(frac * 100)))}%`;
+    panel.fill.style.width = `${Math.max(3, Math.min(100, Math.round(frac * 100)))}%`;
     if (text) panel.status.textContent = text;
   }
   function endProgress(text) {
@@ -222,41 +245,55 @@
   }
 
   function buildRow(token, i) {
-    const row = document.createElement('div');
-    row.className = 'metzion-row';
-    if (i.fresh) row.classList.add('metzion-row-fresh');
-    if (i.kmFlag === 'high') row.classList.add('metzion-row-warn');
-    const price = i.price > 0 ? `${nf.format(i.price)} ₪` : 'ללא מחיר';
-    const l1 = document.createElement('div');
-    l1.className = 'metzion-l1';
-    l1.textContent = `${i.pct != null ? below(i.pct) + ' למחירון' : i.mp != null ? below(i.mp) + ' לשוק' : 'חדשה'} · ${price}`;
-    row.append(l1);
-    if (i.pct != null && i.mp != null) {
-      const lm = document.createElement('div');
-      lm.className = 'metzion-l2';
-      lm.textContent = `מול השוק: ${below(i.mp)} לחציון ${nf.format(i.median)} ₪ (${i.mn} מודעות)`;
-      row.append(lm);
+    const row = el('div', `mz-row mz-${tone(i)}`);
+    const h = headline(i);
+    const pill = el('div', 'mz-pill');
+    pill.append(el('b', null, h.value), el('small', null, h.label));
+
+    const main = el('div', 'mz-main');
+    const top = el('div', 'mz-top');
+    top.append(el('span', 'mz-price', i.price > 0 ? `${nf.format(i.price)} ₪` : 'ללא מחיר'));
+    if (i.listPrice) top.append(el('span', 'mz-ref', `מחירון ${nf.format(i.listPrice)}`));
+    const meta = [i.year, i.hand ? `יד ${i.hand}` : null, i.km ? kmShort(i.km) + (i.kmVerified ? ' ✓' : '') : null];
+    const metaEl = el('div', 'mz-meta', meta.filter(Boolean).join(' · '));
+    const age = M.formatAge(i.minutes);
+    const seller = i.adType === 'private' ? 'פרטי' : i.adType === 'commercial' ? 'סוחר' : null;
+    const sub = el('div', 'mz-sub', [seller, h.src !== 'fresh' && age ? `פורסם ${age}` : null].filter(Boolean).join(' · '));
+
+    // תגיות רק למה שצריך לבלוט
+    const tags = el('div', 'mz-tags');
+    const tag = (text, cls) => tags.append(el('span', `mz-tag${cls ? ' ' + cls : ''}`, text));
+    if (i.fresh && h.src !== 'fresh') tag('חדש', 'mz-tag-new');
+    if (i.kmFlag === 'high') tag('ק״מ גבוה', 'mz-tag-warn');
+    if (h.src === 'list' && i.mp != null && Math.abs(i.mp) >= MIN_SHOW) {
+      const m = Math.round(i.mp);
+      tag(m > 0 ? `${m}% מתחת לשוק` : `${-m}% מעל השוק`, m >= MIN_SHOW ? 'mz-tag-good' : null);
     }
-    const l2 = document.createElement('div');
-    l2.className = 'metzion-l2';
-    const parts = [i.year, i.hand ? `יד ${i.hand}` : null, i.adType === 'private' ? 'פרטי' : i.adType === 'commercial' ? 'סוחר' : null];
-    if (i.km) parts.push(`${nf.format(i.km)} ק״מ${i.kmVerified ? ' ✓' : ''}${KM_TEXT[i.kmFlag] ? ' (' + KM_TEXT[i.kmFlag] + ')' : ''}`);
-    const pub = publishedText(i);
-    if (pub) parts.push(pub);
-    l2.textContent = parts.filter(Boolean).join(' · ');
-    const open = document.createElement('a');
+    main.append(top, metaEl, sub);
+    if (tags.childElementCount) main.append(tags);
+
+    const open = el('a', 'mz-open', '↗');
     open.href = `/vehicles/item/${token}`;
     open.target = '_blank';
     open.rel = 'noopener';
-    open.textContent = 'פתח ↗';
+    open.title = 'פתיחה בלשונית חדשה';
     open.addEventListener('click', (e) => e.stopPropagation());
-    row.append(l2, open);
+
+    const tip = [`מחיר ${i.price > 0 ? nf.format(i.price) + ' ₪' : 'לא צוין'}`];
+    if (i.listPrice) tip.push(`מחירון יד 2: ${nf.format(i.listPrice)} ₪ (${signPct(i.pct)})`);
+    if (i.median) tip.push(`חציון השוק: ${nf.format(i.median)} ₪ מ-${i.mn} מודעות (${signPct(i.mp)})`);
+    if (i.km) tip.push(`${nf.format(i.km)} ק״מ${i.kmVerified ? ', מאומת במשרד התחבורה' : ''}`);
+    const d = M.formatDate(i.createdAt);
+    if (d) tip.push(`פורסם ${d}`);
+    row.title = tip.join('\n');
+
+    row.append(pill, main, open);
     row.addEventListener('click', () => {
       const a = document.querySelector(`a[data-testid="${token}"]`);
       if (!a) { window.open(`/vehicles/item/${token}`, '_blank'); return; }
       a.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      a.classList.add('metzion-flash');
-      setTimeout(() => a.classList.remove('metzion-flash'), 2200);
+      a.classList.add('mz-flash');
+      setTimeout(() => a.classList.remove('mz-flash'), 2200);
     });
     return row;
   }
@@ -266,39 +303,29 @@
     const rows = [...state.decor.entries()].filter(([, i]) => passes(i));
     const mins = (i) => (i.minutes == null ? Infinity : i.minutes);
     rows.sort(([, a], [, b]) => panel.sort === 'new' ? mins(a) - mins(b) : (bestPct(b) ?? -1) - (bestPct(a) ?? -1));
-    for (const b of panel.root.querySelectorAll('.metzion-bar button')) b.classList.toggle('on', b.dataset.mode === panel.sort);
+    for (const b of panel.root.querySelectorAll('.mz-seg button')) b.classList.toggle('on', b.dataset.mode === panel.sort);
     panel.list.replaceChildren(...rows.map(([t, i]) => buildRow(t, i)));
     if (!rows.length) {
-      const e = document.createElement('div');
-      e.className = 'metzion-empty';
-      e.textContent = state.running ? 'טוען מודעות…' : 'אין כרגע מודעות שעומדות בסינון.';
+      const e = el('div', 'mz-empty', state.running ? 'מחפש מציאות…' : 'אין כרגע מודעות שעומדות בסינון');
       panel.list.append(e);
     }
+    panel.count.textContent = String(rows.length);
+    const n = activeFilters();
+    panel.dot.textContent = n ? String(n) : '';
+    panel.dot.hidden = !n;
     const left = state.pagination ? state.pagination.pages - state.nextPage + 1 : 0;
     panel.more.hidden = !(left > 0);
     panel.more.disabled = state.running;
-    panel.more.textContent = `סרוק עוד עמודים (נותרו ${left})`;
+    panel.more.textContent = `עוד עמודים (${left})`;
   }
 
   function buildBadge(info) {
-    const b = document.createElement('div');
-    b.className = 'metzion-badge';
+    const t = tone(info);
+    const b = el('div', `mz-badge mz-${t}`);
     b.dataset.v = String(info.v);
-    if (info.fresh) b.classList.add('metzion-fresh');
-    const best = bestPct(info);
-    const lines = [];
-    if (best != null && best >= MIN_SHOW) {
-      b.classList.add(info.kmFlag === 'high' ? 'metzion-orange' : best >= 15 ? 'metzion-strong' : 'metzion-good');
-    }
-    if (info.pct != null && info.pct >= MIN_SHOW) lines.push(`${info.pct}% מתחת למחירון`);
-    if (info.mp != null && info.mp >= MIN_SHOW) lines.push(`${info.mp}% מתחת לשוק`);
-    if (info.km) {
-      const f = KM_TEXT[info.kmFlag] || '';
-      lines.push(`${nf.format(info.km)} ק״מ${f ? ' · ' + f : ''}${info.kmVerified ? ' ✓' : ''}`);
-    }
-    const pub = publishedText(info);
-    if (pub) lines.push(pub);
-    for (const t of lines) { const s = document.createElement('div'); s.textContent = t; b.append(s); }
+    const h = headline(info);
+    b.append(el('div', 'mz-b1', h.src === 'fresh' ? `חדש · ${h.label}` : `${h.value} ${h.label}`));
+    if (info.km) b.append(el('div', 'mz-b2', kmShort(info.km) + (info.kmFlag === 'high' ? ' · גבוה' : '')));
     if (info.listPrice) b.title = `מחירון יד 2: ${nf.format(info.listPrice)} ₪`;
     return b;
   }
@@ -306,8 +333,8 @@
   function applyBadges() {
     for (const a of document.querySelectorAll('a[data-testid]')) {
       const info = state.decor.get(a.dataset.testid);
-      if (!info || !passes(info)) { const o = a.querySelector(':scope > .metzion-badge'); if (o) o.remove(); continue; }
-      const old = a.querySelector(':scope > .metzion-badge');
+      const old = a.querySelector(':scope > .mz-badge');
+      if (!info || !passes(info)) { if (old) old.remove(); continue; }
       if (old && old.dataset.v === String(info.v)) continue;
       if (old) old.remove();
       if (getComputedStyle(a).position === 'static') a.style.position = 'relative';
@@ -391,7 +418,7 @@
 
   function summary() {
     const shown = [...state.decor.values()].filter(passes).length;
-    return `${shown} מודעות מתאימות, מתוך ${state.ads.size} שנסרקו${state.blocked ? ' · נחסם על ידי יד 2' : ''}`;
+    return state.blocked ? 'יד 2 חסמה בקשות, נסו מאוחר יותר' : `${shown} מתוך ${state.ads.size} מודעות שנסרקו`;
   }
 
   async function scan() {
@@ -404,7 +431,7 @@
     if (state.doneSig === sig) return;
     state.running = true;
     try {
-      setProgress(0.03, 'טוען מודעות…');
+      setProgress(0.03, 'קורא מודעות…');
       renderPanel();
       const { ads, pagination } = await loadAds();
       if (state.sig !== sig) return;
@@ -456,7 +483,7 @@
 
   chrome.storage.local.get('filters').then((o) => {
     Object.assign(filters, o.filters || {});
-    if (panel.selects) for (const [k, sel] of Object.entries(panel.selects)) sel.value = String(filters[k]);
+    syncSelects();
     if (panel.root) render();
   });
 
