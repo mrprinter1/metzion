@@ -2,7 +2,7 @@
 // מציאון: מסמן בדף התוצאות של יד 2 רכבים שמחירם נמוך מהמחירון.
 (function () {
   const M = globalThis.Metzion;
-  const MIN_SHOW = 5;        // מאיזה אחוז מתחת למחירון מציגים תגית
+  const MIN_SHOW = 10;       // מאיזה אחוז מתחת למחירון מופיעה מודעה ברשימה ובתגית
   const KM_THRESHOLD = 10;   // רק מועמדות כאלה מקבלות בקשה לדף המודעה (בשביל הק"מ)
   const FRESH_MIN = 60;      // "עלתה לאחרונה" = עד שעה
   const MAX_LOOKUPS = 30;    // מקסימום שילובי תת-דגם ושנה בעמוד אחד
@@ -14,18 +14,87 @@
   const state = { sig: null, doneSig: null, running: false, decor: new Map(), blocked: false,
     vehiclesBuildId: null, plBuildId: null, plBuildTs: 0, counted: new Set() };
 
-  let chip = null;
-  function setStatus(text) {
-    if (!chip) {
-      chip = document.createElement('div');
-      chip.className = 'metzion-status';
-      chip.title = 'לחיצה מסתירה';
-      chip.addEventListener('click', () => chip.remove());
-      document.body.append(chip);
+  const panel = { root: null, status: null, list: null };
+  let sortMode = 'pct';
+  function ensurePanel() {
+    if (panel.root && panel.root.isConnected) return;
+    const root = document.createElement('div');
+    root.className = 'metzion-panel';
+    const head = document.createElement('div');
+    head.className = 'metzion-head';
+    const title = document.createElement('strong');
+    title.textContent = 'מציאון';
+    const status = document.createElement('span');
+    status.className = 'metzion-st';
+    const toggle = document.createElement('button');
+    toggle.textContent = '–';
+    toggle.title = 'צמצום והרחבה';
+    toggle.addEventListener('click', () => root.classList.toggle('metzion-collapsed'));
+    head.append(title, status, toggle);
+    const bar = document.createElement('div');
+    bar.className = 'metzion-bar';
+    for (const [mode, label] of [['pct', 'לפי הנחה'], ['new', 'הכי חדשות']]) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.dataset.mode = mode;
+      b.addEventListener('click', () => { sortMode = mode; renderPanel(); });
+      bar.append(b);
     }
-    if (!chip.isConnected) document.body.append(chip);
-    chip.textContent = 'מציאון: ' + text;
+    const list = document.createElement('div');
+    list.className = 'metzion-list';
+    root.append(head, bar, list);
+    document.body.append(root);
+    panel.root = root; panel.status = status; panel.list = list;
   }
+  function setStatus(text) { ensurePanel(); panel.status.textContent = text; }
+
+  function buildRow(token, i) {
+    const row = document.createElement('div');
+    row.className = 'metzion-row';
+    if (i.fresh) row.classList.add('metzion-row-fresh');
+    if (i.kmFlag === 'high') row.classList.add('metzion-row-warn');
+    const l1 = document.createElement('div');
+    l1.className = 'metzion-l1';
+    l1.textContent = `${i.pct != null ? i.pct + '% מתחת' : 'חדשה'} · ${nf.format(i.price)} ₪`;
+    const l2 = document.createElement('div');
+    l2.className = 'metzion-l2';
+    const parts = [i.year, i.hand ? `יד ${i.hand}` : null];
+    if (i.km) parts.push(`${nf.format(i.km)} ק״מ${i.kmVerified ? ' ✓' : ''}${KM_TEXT[i.kmFlag] ? ' (' + KM_TEXT[i.kmFlag] + ')' : ''}`);
+    if (i.fresh) parts.push(`לפני ${Math.max(1, Math.round(i.minutes))} דק׳`);
+    l2.textContent = parts.filter(Boolean).join(' · ');
+    const open = document.createElement('a');
+    open.href = `/vehicles/item/${token}`;
+    open.target = '_blank';
+    open.rel = 'noopener';
+    open.textContent = 'פתח ↗';
+    open.addEventListener('click', (e) => e.stopPropagation());
+    row.append(l1, l2, open);
+    row.addEventListener('click', () => {
+      const a = document.querySelector(`a[data-testid="${token}"]`);
+      if (!a) { window.open(`/vehicles/item/${token}`, '_blank'); return; }
+      a.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      a.classList.add('metzion-flash');
+      setTimeout(() => a.classList.remove('metzion-flash'), 2200);
+    });
+    return row;
+  }
+
+  function renderPanel() {
+    ensurePanel();
+    const rows = [...state.decor.entries()].filter(([, i]) => (i.pct != null && i.pct >= MIN_SHOW) || i.fresh);
+    const mins = (i) => (i.minutes == null ? Infinity : i.minutes);
+    rows.sort(([, a], [, b]) => sortMode === 'new' ? mins(a) - mins(b) : (b.pct ?? -1) - (a.pct ?? -1));
+    for (const b of panel.root.querySelectorAll('.metzion-bar button')) b.classList.toggle('on', b.dataset.mode === sortMode);
+    panel.list.replaceChildren(...rows.map(([t, i]) => buildRow(t, i)));
+    if (!rows.length) {
+      const e = document.createElement('div');
+      e.className = 'metzion-empty';
+      e.textContent = 'אין כרגע מודעות שמחירן 10% ומעלה מתחת למחירון.';
+      panel.list.append(e);
+    }
+  }
+
+  function render() { applyBadges(); renderPanel(); }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let lastReq = 0;
@@ -140,7 +209,7 @@
     return b;
   }
 
-  function apply() {
+  function applyBadges() {
     for (const a of document.querySelectorAll('a[data-testid]')) {
       const info = state.decor.get(a.dataset.testid);
       if (!info) continue;
@@ -179,14 +248,14 @@
       for (const ad of ads) {
         const minutes = M.minutesSince(ad.createdAt, now);
         const fresh = minutes != null && minutes >= 0 && minutes <= FRESH_MIN;
-        if (fresh) state.decor.set(ad.token, { v: 1, fresh: true, minutes, pct: null });
+        if (fresh) state.decor.set(ad.token, { v: 1, fresh: true, minutes, pct: null, price: ad.price, year: ad.year, hand: ad.hand });
         if (!ad.price || !ad.subModelId || !ad.year) continue;
         const k = `${ad.subModelId}/${ad.year}`;
         if (lookups.size >= MAX_LOOKUPS && !lookups.has(k)) continue;
         lookups.set(k, null);
         cands.push({ ad, k, fresh, minutes });
       }
-      apply();
+      render();
       for (const k of lookups.keys()) {
         if (state.blocked || state.sig !== sig) break;
         const [sm, y] = k.split('/');
@@ -199,11 +268,11 @@
         const lp = lookups.get(c.k);
         const pct = M.discountPct(lp, c.ad.price);
         if (pct == null || (pct < MIN_SHOW && !c.fresh)) continue;
-        const info = { v: 1, fresh: c.fresh, minutes: c.minutes, pct, listPrice: lp, year: c.ad.year };
+        const info = { v: 1, fresh: c.fresh, minutes: c.minutes, pct, listPrice: lp, year: c.ad.year, price: c.ad.price, hand: c.ad.hand };
         state.decor.set(c.ad.token, info);
         if (pct >= KM_THRESHOLD) bargains.push(c.ad.token);
       }
-      apply();
+      render();
       for (const token of bargains) {
         if (state.blocked || state.sig !== sig) break;
         const info = state.decor.get(token);
@@ -211,7 +280,7 @@
         if (it && it.km) {
           state.decor.set(token, bump({ ...info, km: it.km, kmVerified: it.kmVerified,
             kmFlag: M.kmFlag(it.km, info.year, Date.now()) }));
-          apply();
+          render();
         }
         bumpStats(info.pct, token);
       }
@@ -228,7 +297,7 @@
   let timer = null;
   new MutationObserver(() => {
     clearTimeout(timer);
-    timer = setTimeout(() => { apply(); if (location.href !== state.doneSig) scan(); }, 700);
+    timer = setTimeout(() => { applyBadges(); if (location.href !== state.doneSig) scan(); }, 700);
   }).observe(document.body, { childList: true, subtree: true });
   scan();
 })();
