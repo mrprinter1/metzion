@@ -14,6 +14,19 @@
   const state = { sig: null, doneSig: null, running: false, decor: new Map(), blocked: false,
     vehiclesBuildId: null, plBuildId: null, plBuildTs: 0, counted: new Set() };
 
+  let chip = null;
+  function setStatus(text) {
+    if (!chip) {
+      chip = document.createElement('div');
+      chip.className = 'metzion-status';
+      chip.title = 'לחיצה מסתירה';
+      chip.addEventListener('click', () => chip.remove());
+      document.body.append(chip);
+    }
+    if (!chip.isConnected) document.body.append(chip);
+    chip.textContent = 'מציאון: ' + text;
+  }
+
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let lastReq = 0;
   async function polite(fn) {
@@ -155,8 +168,10 @@
     if (state.doneSig === sig) return;
     state.running = true;
     try {
+      setStatus('סורק…');
       const ads = await loadAds();
       if (state.sig !== sig) return;
+      setStatus(`נמצאו ${ads.length} מודעות, שולף מחירון…`);
       const now = Date.now();
       const bump = (o) => { const o2 = { ...o }; o2.v = (o.v || 0) + 1; return o2; };
       const cands = [];
@@ -177,6 +192,8 @@
         const [sm, y] = k.split('/');
         lookups.set(k, await listPrice(sm, y));
       }
+      const got = [...lookups.values()].filter((v) => v > 0).length;
+      setStatus(`מחירון: ${got} מתוך ${lookups.size} שילובים${state.blocked ? ' · נחסם על ידי יד 2' : ''}`);
       const bargains = [];
       for (const c of cands) {
         const lp = lookups.get(c.k);
@@ -199,8 +216,10 @@
         bumpStats(info.pct, token);
       }
       state.doneSig = sig;
+      setStatus(`הסתיים: ${state.decor.size} תגיות, ${bargains.length} מציאות (מ-${ads.length} מודעות)${state.blocked ? ' · נחסם' : ''}`);
     } catch (e) {
       console.debug('מציאון: שגיאה', e);
+      setStatus('שגיאה: ' + (e && e.message ? e.message : e));
     } finally {
       state.running = false;
     }
