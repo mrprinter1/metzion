@@ -1,0 +1,12 @@
+.metzion-badge {
+  position: absolute; top: 8px; left: 8px; z-index: 5;
+  padding: 4px 8px; border-radius: 8px; border: 2px solid transparent;
+  font: 600 12px/1.35 system-ui, sans-serif; color: #fff; background: #555;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .3); pointer-events: none; direction: rtl; text-align: right;
+}
+.metzion-strong { background: #0a7d32; }
+.metzion-good { background: #2e9e4f; }
+.metzion-mild { background: #b8860b; }
+.metzion-warn { border-color: #d93025; }
+.metzion-fresh { border-color: #1a73e8; }
+.metzion-fresh:not(.metzion-strong):not(.metzion-good):not(.metzion-mild) { background: #1a73e8; }
