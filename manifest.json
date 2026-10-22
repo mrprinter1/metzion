@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "מציאון",
+  "version": "0.0.1",
+  "description": "מסמן ביד 2 רכבים במחיר נמוך מהמחירון",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.yad2.co.il/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.yad2.co.il/vehicles/*"],
+      "js": ["src/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
