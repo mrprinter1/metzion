@@ -147,3 +147,21 @@ test('priceDrop', () => {
   assert.strictEqual(M.priceDrop([], 0, 80000), null);
   assert.strictEqual(M.priceDrop([], 70000, 70500), null);
 });
+
+test('inQuietHours כולל מעבר חצות', () => {
+  const at = (h, m) => new Date(2026, 9, 22, h, m);
+  assert.strictEqual(M.inQuietHours(at(23, 30), '23:00', '07:00'), true);
+  assert.strictEqual(M.inQuietHours(at(3, 0), '23:00', '07:00'), true);
+  assert.strictEqual(M.inQuietHours(at(7, 0), '23:00', '07:00'), false);
+  assert.strictEqual(M.inQuietHours(at(12, 0), '23:00', '07:00'), false);
+  assert.strictEqual(M.inQuietHours(at(14, 0), '13:00', '15:00'), true);
+  assert.strictEqual(M.inQuietHours(at(14, 0), '10:00', '10:00'), false);
+});
+
+test('extractAds כולל שם רכב', () => {
+  const d = { props: { pageProps: { dehydratedState: { queries: [{ queryKey: ['feed-mix'], state: { data: { ads: [
+    { token: 't1', price: 1, manufacturer: { text: 'שברולט' }, model: { text: 'ספארק' }, subModel: { id: 5, text: 'LT Plus' } }] } } }] } } } };
+  const [ad] = M.extractAds(d);
+  assert.strictEqual(ad.name, 'שברולט ספארק');
+  assert.strictEqual(ad.subModelText, 'LT Plus');
+});

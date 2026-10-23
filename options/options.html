@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>מציאון · הגדרות</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header class="top">
+      <span class="logo"></span>
+      <h1>מציאון</h1>
+      <span class="sub">הגדרות</span>
+    </header>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>התראות על מציאות חדשות</h2>
+        <span class="premium">פרימיום · חינם בתקופת הניסיון</span>
+      </div>
+      <p class="lead">מציאון בודק את החיפושים השמורים כל כמה דקות, ושולח התראה כשעולה מודעה חדשה שמחירה 10% ומעלה מתחת למחירון או לשוק.</p>
+      <div class="note">
+        <strong>חשוב:</strong> הבדיקה רצה רק כשהמחשב דולק וכרום פתוח (אפשר ממוזער).
+        כשהמחשב כבוי או במצב שינה לא נבדק כלום, ובהדלקה הבאה תגיע התראה על מה שעלה בינתיים.
+        <span class="mac">במק: סגירת החלון בסדר, אבל לא לצאת מכרום (Cmd+Q).</span>
+      </div>
+
+      <h3>חיפושים שמורים <span id="count" class="muted"></span></h3>
+      <div id="searches" class="searches"></div>
+      <p id="empty" class="muted small" hidden>אין עדיין חיפושים שמורים. בחיפוש ביד 2, לחצו על 🔔 בפאנל של מציאון.</p>
+
+      <div class="row">
+        <label class="field">
+          <span>תדירות בדיקה</span>
+          <select id="interval">
+            <option value="10">כל 10 דקות</option>
+            <option value="15">כל 15 דקות</option>
+            <option value="30">כל 30 דקות</option>
+            <option value="60">כל שעה</option>
+          </select>
+        </label>
+        <button id="pollNow" class="btn">בדיקה עכשיו</button>
+        <span id="pollMsg" class="muted small"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>שעות שקט</h2>
+        <label class="switch"><input type="checkbox" id="quietOn"><span></span></label>
+      </div>
+      <p class="lead">בשעות האלה לא נבדק כלום ולא נשלחות התראות. בסופן מגיעות התראות על מה שעלה בינתיים.</p>
+      <div class="row" id="quietTimes">
+        <label class="field"><span>משעה</span><input type="time" id="quietFrom"></label>
+        <label class="field"><span>עד שעה</span><input type="time" id="quietTo"></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>התראות בטלגרם</h2>
+        <label class="switch"><input type="checkbox" id="tgOn"><span></span></label>
+      </div>
+      <p class="lead">כדי לקבל את ההתראות גם בטלפון, דרך בוט טלגרם פרטי שלכם.</p>
+      <ol class="steps">
+        <li>בטלגרם, פתחו שיחה עם <b>@BotFather</b>, שלחו <code>/newbot</code> ובחרו שם. תקבלו <b>טוקן</b>.</li>
+        <li>הדביקו את הטוקן כאן:
+          <input type="password" id="tgToken" class="wide" placeholder="123456789:ABC..." autocomplete="off" spellcheck="false">
+        </li>
+        <li>פתחו שיחה עם הבוט החדש ושלחו לו הודעה כלשהי (למשל "שלום").</li>
+        <li><button id="tgConnect" class="btn">חיבור</button> <span id="tgStatus" class="muted small"></span></li>
+      </ol>
+      <div class="row">
+        <button id="tgTest" class="btn ghost">שליחת הודעת בדיקה</button>
+        <span id="tgTestMsg" class="muted small"></span>
+      </div>
+      <p class="muted small">הטוקן נשמר רק בדפדפן הזה ולא נשלח לשום מקום חוץ מטלגרם.</p>
+    </section>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

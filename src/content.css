@@ -30,6 +30,8 @@
 .mz-dot[hidden] { display: none; }
 .mz-icon { width: 26px; height: 26px; border: 0; border-radius: 8px; background: none; font-size: 18px; line-height: 1; color: var(--mz-sub) !important; }
 .mz-icon:hover { background: var(--mz-soft); }
+.mz-bell { font-size: 14px; filter: grayscale(1); opacity: .6; }
+.mz-bell.on { filter: none; opacity: 1; background: #e3f4ea; }
 
 .mz-progress { height: 3px; background: transparent; }
 .mz-progress i { display: block; height: 100%; width: 0; background: var(--mz-new); opacity: 0; transition: width .3s ease, opacity .3s; }

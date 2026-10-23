@@ -38,6 +38,8 @@
       createdAt: ad.createdAt,
       adType: ad.adType,
       priceBefore: Number(ad.metaData && ad.metaData.priceBeforeTag) || null,
+      name: [ad.manufacturer && ad.manufacturer.text, ad.model && ad.model.text].filter(Boolean).join(' '),
+      subModelText: (ad.subModel && ad.subModel.text) || '',
     }));
   }
 
@@ -145,6 +147,16 @@
     return { amount, at: last && prev.length > 1 ? last.t : null };
   }
 
+  // שעות שקט, כולל טווח שעובר את חצות (למשל 23:00 עד 07:00).
+  function inQuietHours(date, from, to) {
+    const p = (s) => { const [h, m] = String(s || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+    const now = date.getHours() * 60 + date.getMinutes();
+    const a = p(from);
+    const b = p(to);
+    if (a === b) return false;
+    return a < b ? now >= a && now < b : now >= a || now < b;
+  }
+
   function formatAge(minutes) {
     if (minutes == null) return null;
     if (minutes < 60) return `לפני ${Math.max(1, Math.round(minutes))} דק׳`;
@@ -202,7 +214,7 @@
 
   const api = {
     parseNextDataFromHtml, extractAds, extractItem, extractListPrice,
-    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate, median, marketStats, extractPagination, dealScore, redFlags, suspicion, priceDrop,
+    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate, median, marketStats, extractPagination, dealScore, redFlags, suspicion, priceDrop, inQuietHours,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Metzion = api;

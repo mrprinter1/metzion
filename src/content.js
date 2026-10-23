@@ -187,6 +187,12 @@
     brand.append(el('span', 'mz-logo'), el('strong', null, 'מציאון'));
     const count = el('span', 'mz-count', '0');
     const spacer = el('span', 'mz-spacer');
+    const bell = el('button', 'mz-icon mz-bell', '🔔');
+    bell.title = 'התראה על מציאות חדשות בחיפוש הזה';
+    bell.addEventListener('click', () => toggleSavedSearch());
+    const gear = el('button', 'mz-icon', '⚙');
+    gear.title = 'הגדרות והתראות';
+    gear.addEventListener('click', () => chrome.runtime.sendMessage({ type: 'openOptions' }));
     const filterBtn = el('button', 'mz-btn mz-filter-btn', 'סינון');
     const dot = el('span', 'mz-dot');
     filterBtn.append(dot);
@@ -194,7 +200,7 @@
     const collapse = el('button', 'mz-icon', '–');
     collapse.title = 'צמצום והרחבה';
     collapse.addEventListener('click', () => root.classList.toggle('mz-collapsed'));
-    head.append(brand, count, spacer, filterBtn, collapse);
+    head.append(brand, count, spacer, bell, filterBtn, gear, collapse);
 
     const prog = el('div', 'mz-progress');
     const fill = el('i');
@@ -231,9 +237,34 @@
 
     root.append(head, prog, seg, fl, list, foot);
     document.body.append(root);
-    Object.assign(panel, { root, count, dot, status, fill, prog, list, more, hiddenLink });
+    Object.assign(panel, { root, count, dot, status, fill, prog, list, more, hiddenLink, bell });
+    refreshBell();
     panel.sort = panel.sort || 'score';
     syncSelects();
+  }
+
+  // ---------- חיפוש שמור (התראות) ----------
+  function searchUrl() {
+    const u = new URL(location.href);
+    u.searchParams.delete('page');
+    return u.origin + u.pathname + (u.searchParams.toString() ? '?' + u.searchParams.toString() : '');
+  }
+  async function refreshBell() {
+    if (!panel.bell) return;
+    const { searches = [] } = await chrome.storage.local.get('searches');
+    const on = searches.some((x) => x.url === searchUrl());
+    panel.bell.classList.toggle('on', on);
+    panel.bell.title = on ? 'התראות פעילות לחיפוש הזה (לחיצה מבטלת)' : 'התראה על מציאות חדשות בחיפוש הזה';
+  }
+  async function toggleSavedSearch() {
+    const h1 = document.querySelector('h1');
+    const title = ((h1 && h1.textContent) || document.title || '').trim().slice(0, 80);
+    const r = await chrome.runtime.sendMessage({ type: 'saveSearch', search: {
+      url: searchUrl(), title, filters: { ...filters }, seen: [...state.ads.keys()],
+    } });
+    if (!r || !r.ok) { setStatus((r && r.error) || 'השמירה נכשלה'); return; }
+    setStatus(r.saved ? 'התראות הופעלו. מציאות חדשות יגיעו כהתראה (המחשב צריך להישאר דולק)' : 'ההתראות לחיפוש הזה בוטלו');
+    refreshBell();
   }
 
   function setStatus(text) { ensurePanel(); panel.status.textContent = text; }
