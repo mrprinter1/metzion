@@ -37,6 +37,7 @@
       hand: ad.hand && ad.hand.id,
       createdAt: ad.createdAt,
       adType: ad.adType,
+      priceBefore: Number(ad.metaData && ad.metaData.priceBeforeTag) || null,
     }));
   }
 
@@ -50,6 +51,7 @@
       kmInLastTest: Number(d.kmInLastTest) || null,
       kmVerified: !!(d.isVerifiedByMt && d.isVerifiedByMt.km),
       createdAt: d.dates && d.dates.createdAt,
+      description: (d.metaData && d.metaData.description) || '',
     };
   }
 
@@ -96,7 +98,51 @@
       s += 20 * (1 - r);
     }
     if (i.hand > 1) s -= 1.5 * (i.hand - 1);
+    if (i.suspect) s -= 10;
     return Math.round(s * 10) / 10;
+  }
+
+  // מילים בתיאור שמרמזות על בעיה. neg = לבדוק שלא כתוב לפניהן "ללא", "לא עבר" וכו'.
+  const RED_FLAGS = [
+    { re: /תאונ/, why: 'תאונה', neg: true },
+    { re: /(פגיע|נזק)\S*\s+(ב?שלדה)/, why: 'פגיעת שלדה', neg: true },
+    { re: /ירידת ערך/, why: 'ירידת ערך', neg: true },
+    { re: /מקדמה|החזר חודשי|מחיר סמלי/, why: 'ייתכן שהמחיר הוא מקדמה' },
+    { re: /(ללא|בלי|אין)\s+טסט/, why: 'בלי טסט' },
+    { re: /לא מניע|לא נוסע|לחלקים|תקלה|הצפה|מוצף|פגוע/, why: 'תקלה או נזק', neg: true },
+  ];
+  const NEGATION = /(ללא|בלי|אין|לא עבר|לא עברה|לא היו|לא היה|אפס)\s*$/;
+
+  function redFlags(text) {
+    const out = [];
+    const t = String(text || '');
+    for (const f of RED_FLAGS) {
+      const re = new RegExp(f.re.source, 'g');
+      let m;
+      while ((m = re.exec(t))) {
+        if (f.neg && NEGATION.test(t.slice(Math.max(0, m.index - 12), m.index))) continue;
+        if (!out.includes(f.why)) out.push(f.why);
+        break;
+      }
+    }
+    return out;
+  }
+
+  // סיבות לחשד: הנחה חריגה (30%+) או מילים בעייתיות בתיאור.
+  function suspicion(bestPct, description) {
+    const out = bestPct >= 30 ? ['הנחה חריגה, כדאי לברר למה'] : [];
+    return out.concat(redFlags(description));
+  }
+
+  // ירידת מחיר: לפי היסטוריה שנשמרה ([{p, t}]) או לפי המחיר הקודם שיד 2 מציגה.
+  function priceDrop(history, price, priceBefore) {
+    if (!(price > 0)) return null;
+    const prev = (history || []).map((h) => h.p).filter((p) => p > 0);
+    const max = Math.max(priceBefore || 0, ...prev, 0);
+    const amount = max - price;
+    if (amount < 1000) return null;
+    const last = (history || []).filter((h) => h.p === price)[0];
+    return { amount, at: last && prev.length > 1 ? last.t : null };
   }
 
   function formatAge(minutes) {
@@ -156,7 +202,7 @@
 
   const api = {
     parseNextDataFromHtml, extractAds, extractItem, extractListPrice,
-    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate, median, marketStats, extractPagination, dealScore,
+    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate, median, marketStats, extractPagination, dealScore, redFlags, suspicion, priceDrop,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Metzion = api;

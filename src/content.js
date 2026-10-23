@@ -17,6 +17,9 @@
     lp: new Map(),       // "תת-דגם/שנה" -> מחיר מחירון (או null)
     decor: new Map(),    // token -> מידע לתצוגה
     kmTried: new Set(), counted: new Set(),
+    marks: {},           // token -> 'seen' | 'hidden'
+    prevTokens: null,    // מודעות שנראו בביקור הקודם באותו חיפוש
+    drops: new Map(),    // token -> ירידת מחיר
     pagination: null, nextPage: 2,
     vehiclesBuildId: null, plBuildId: null, plBuildTs: 0,
   };
@@ -143,6 +146,7 @@
   }
 
   function passes(i) {
+    if (i.hidden && !panel.showHidden) return false;
     const best = bestPct(i);
     if (!i.fresh && !(best != null && best >= filters.minPct)) return false;
     if (filters.maxKm && i.km && i.km > filters.maxKm) return false;
@@ -219,13 +223,15 @@
     const list = el('div', 'mz-list');
     const foot = el('div', 'mz-foot');
     const status = el('span', 'mz-status');
+    const hiddenLink = el('button', 'mz-link mz-hidden-link');
+    hiddenLink.addEventListener('click', () => { panel.showHidden = !panel.showHidden; render(); });
     const more = el('button', 'mz-btn mz-more');
     more.addEventListener('click', () => scanMore());
-    foot.append(status, more);
+    foot.append(status, hiddenLink, more);
 
     root.append(head, prog, seg, fl, list, foot);
     document.body.append(root);
-    Object.assign(panel, { root, count, dot, status, fill, prog, list, more });
+    Object.assign(panel, { root, count, dot, status, fill, prog, list, more, hiddenLink });
     panel.sort = panel.sort || 'score';
     syncSelects();
   }
@@ -260,37 +266,61 @@
     const seller = i.adType === 'private' ? 'פרטי' : i.adType === 'commercial' ? 'סוחר' : null;
     const sub = el('div', 'mz-sub', [seller, h.src !== 'fresh' && age ? `פורסם ${age}` : null].filter(Boolean).join(' · '));
 
-    // תגיות רק למה שצריך לבלוט
-    const tags = el('div', 'mz-tags');
-    const tag = (text, cls) => tags.append(el('span', `mz-tag${cls ? ' ' + cls : ''}`, text));
-    if (isTop) tag('★ הכי משתלם', 'mz-tag-top');
-    if (i.fresh && h.src !== 'fresh') tag('חדש', 'mz-tag-new');
-    if (i.kmFlag === 'high') tag('ק״מ גבוה', 'mz-tag-warn');
+    // תגיות רק למה שצריך לבלוט, לפי סדר חשיבות, ולכל היותר 2 (השאר בחלונית המידע)
+    const tags = [];
+    if (isTop) tags.push(['★ הכי משתלם', 'mz-tag-top']);
+    if (i.flags && i.flags.length) tags.push(['⚠ לבדוק', 'mz-tag-bad']);
+    if ((i.fresh || i.newVisit) && h.src !== 'fresh') tags.push(['חדש', 'mz-tag-new']);
+    if (i.kmFlag === 'high') tags.push(['ק״מ גבוה', 'mz-tag-warn']);
+    if (i.drop) tags.push([`ירד ${nf.format(i.drop.amount)} ₪`, 'mz-tag-good']);
     if (h.src === 'list' && i.mp != null && Math.abs(i.mp) >= MIN_SHOW) {
       const m = Math.round(i.mp);
-      tag(m > 0 ? `${m}% מתחת לשוק` : `${-m}% מעל השוק`, m >= MIN_SHOW ? 'mz-tag-good' : null);
+      tags.push([m > 0 ? `${m}% מתחת לשוק` : `${-m}% מעל השוק`, m >= MIN_SHOW ? 'mz-tag-good' : null]);
     }
     main.append(top, metaEl, sub);
-    if (tags.childElementCount) main.append(tags);
+    if (tags.length) {
+      const box = el('div', 'mz-tags');
+      for (const [text, cls] of tags.slice(0, 2)) box.append(el('span', `mz-tag${cls ? ' ' + cls : ''}`, text));
+      main.append(box);
+    }
 
-    const open = el('a', 'mz-open', '↗');
+    // פעולות: מופיעות רק במעבר עכבר
+    const actions = el('div', 'mz-actions');
+    const act = (glyph, title, fn) => {
+      const b = el('button', 'mz-act', glyph);
+      b.title = title;
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+      actions.append(b);
+      return b;
+    };
+    const open = el('a', 'mz-act', '↗');
     open.href = `/vehicles/item/${token}`;
     open.target = '_blank';
     open.rel = 'noopener';
     open.title = 'פתיחה בלשונית חדשה';
-    open.addEventListener('click', (e) => e.stopPropagation());
+    open.addEventListener('click', (e) => { e.stopPropagation(); setMark(token, 'seen'); });
+    actions.append(open);
+    act(i.seen ? '↺' : '✓', i.seen ? 'סימון כלא נבדקה' : 'סימון כנבדקה', () => setMark(token, i.seen ? null : 'seen'));
+    act(i.hidden ? '↺' : '✕', i.hidden ? 'החזרה לרשימה' : 'הסתרה', () => setMark(token, i.hidden ? null : 'hidden'));
+    if (i.seen) row.classList.add('mz-seen');
+    if (i.hidden) row.classList.add('mz-is-hidden');
 
     const tip = [`מחיר ${i.price > 0 ? nf.format(i.price) + ' ₪' : 'לא צוין'}`];
     if (i.listPrice) tip.push(`מחירון יד 2: ${nf.format(i.listPrice)} ₪ (${signPct(i.pct)})`);
     if (i.median) tip.push(`חציון השוק: ${nf.format(i.median)} ₪ מ-${i.mn} מודעות (${signPct(i.mp)})`);
     if (i.km) tip.push(`${nf.format(i.km)} ק״מ${i.kmVerified ? ', מאומת במשרד התחבורה' : ''}`);
+    if (i.drop) {
+      const when = i.drop.at ? ` (${M.formatAge((Date.now() - i.drop.at) / 60000)})` : '';
+      tip.push(`המחיר ירד ב-${nf.format(i.drop.amount)} ₪${when}`);
+    }
+    if (i.flags && i.flags.length) tip.push(`⚠ ${i.flags.join(' · ')}`);
     const d = M.formatDate(i.createdAt);
     if (d) tip.push(`פורסם ${d}`);
     const sc = M.dealScore(i, Date.now());
-    if (sc != null) tip.push(`ציון משתלמות: ${sc} (הנחה, מתוקנת לפי ק״מ ויד)`);
+    if (sc != null) tip.push(`ציון משתלמות: ${sc} (הנחה, מתוקנת לפי ק״מ, יד וחשד)`);
     row.title = tip.join('\n');
 
-    row.append(pill, main, open);
+    row.append(pill, main, actions);
     row.addEventListener('click', () => {
       const a = document.querySelector(`a[data-testid="${token}"]`);
       if (!a) { window.open(`/vehicles/item/${token}`, '_blank'); return; }
@@ -316,7 +346,10 @@
       const e = el('div', 'mz-empty', state.running ? 'מחפש מציאות…' : 'אין כרגע מודעות שעומדות בסינון');
       panel.list.append(e);
     }
-    panel.count.textContent = String(rows.length);
+    panel.count.textContent = String(rows.filter(([, i]) => !i.hidden).length);
+    const hiddenCount = [...state.decor.values()].filter((i) => i.hidden).length;
+    panel.hiddenLink.hidden = !hiddenCount;
+    panel.hiddenLink.textContent = panel.showHidden ? 'הסתרת המוסתרות' : `${hiddenCount} מוסתרות`;
     const n = activeFilters();
     panel.dot.textContent = n ? String(n) : '';
     panel.dot.hidden = !n;
@@ -332,7 +365,11 @@
     b.dataset.v = String(info.v);
     const h = headline(info);
     b.append(el('div', 'mz-b1', h.src === 'fresh' ? `חדש · ${h.label}` : `${h.value} ${h.label}`));
-    if (info.km) b.append(el('div', 'mz-b2', kmShort(info.km) + (info.kmFlag === 'high' ? ' · גבוה' : '')));
+    const second = [];
+    if (info.flags && info.flags.length) second.push('⚠ לבדוק');
+    if (info.km) second.push(kmShort(info.km) + (info.kmFlag === 'high' ? ' · גבוה' : ''));
+    if (second.length) b.append(el('div', 'mz-b2', second.join(' · ')));
+    if (info.seen) b.classList.add('mz-dim');
     if (info.listPrice) b.title = `מחירון יד 2: ${nf.format(info.listPrice)} ₪`;
     return b;
   }
@@ -341,7 +378,7 @@
     for (const a of document.querySelectorAll('a[data-testid]')) {
       const info = state.decor.get(a.dataset.testid);
       const old = a.querySelector(':scope > .mz-badge');
-      if (!info || !passes(info)) { if (old) old.remove(); continue; }
+      if (!info || info.hidden || !passes(info)) { if (old) old.remove(); continue; }
       if (old && old.dataset.v === String(info.v)) continue;
       if (old) old.remove();
       if (getComputedStyle(a).position === 'static') a.style.position = 'relative';
@@ -365,11 +402,17 @@
       const mp = ms ? M.discountPct(ms.median, ad.price) : null;
       const best = Math.max(pct == null ? -Infinity : pct, mp == null ? -Infinity : mp);
       if (!(best >= MIN_SHOW) && !fresh) { state.decor.delete(token); continue; }
+      const flags = M.suspicion(best, prev.desc);
+      const mark = state.marks[token];
       state.decor.set(token, {
         v: (prev.v || 0) + 1, fresh, minutes, createdAt: ad.createdAt, pct, listPrice: lp,
         mp, mn: ms ? ms.n : null, median: ms ? ms.median : null,
         year: ad.year, price: ad.price, hand: ad.hand, adType: ad.adType,
-        km: prev.km, kmVerified: prev.kmVerified, kmFlag: prev.kmFlag,
+        km: prev.km, kmVerified: prev.kmVerified, kmFlag: prev.kmFlag, desc: prev.desc,
+        flags, suspect: flags.length > 0,
+        drop: state.drops.get(token) || null,
+        newVisit: !!(state.prevTokens && !state.prevTokens.has(token)),
+        seen: mark === 'seen', hidden: mark === 'hidden',
       });
     }
   }
@@ -383,9 +426,56 @@
     await chrome.storage.local.set({ stats: s });
   }
 
+  // שומרים את המחיר של כל מודעה שראינו, כדי לזהות ירידות מחיר בין ביקורים.
+  async function updatePriceHistory(ads) {
+    const withPrice = ads.filter((a) => a.price > 0);
+    if (!withPrice.length) return;
+    const keys = withPrice.map((a) => `ph:${a.token}`);
+    const stored = await chrome.storage.local.get(keys);
+    const changed = {};
+    for (const ad of withPrice) {
+      const key = `ph:${ad.token}`;
+      const hist = (stored[key] && stored[key].v) || [];
+      const last = hist[hist.length - 1];
+      if (!last || last.p !== ad.price) {
+        hist.push({ p: ad.price, t: Date.now() });
+        changed[key] = { v: hist.slice(-10), ts: Date.now() };
+      }
+      const drop = M.priceDrop(hist, ad.price, ad.priceBefore);
+      if (drop) state.drops.set(ad.token, drop); else state.drops.delete(ad.token);
+    }
+    if (Object.keys(changed).length) await chrome.storage.local.set(changed);
+  }
+
+  // "ראיתי" / "הסתר"
+  async function setMark(token, mark) {
+    if (mark) state.marks[token] = mark; else delete state.marks[token];
+    await chrome.storage.local.set({ marks: state.marks });
+    rebuildDecor();
+    render();
+  }
+
+  // מפתח לחיפוש בלי מספר עמוד, כדי לזהות "חדש מאז הביקור הקודם"
+  function visitKey() {
+    const u = new URL(location.href);
+    u.searchParams.delete('page');
+    return `visit:${u.pathname}?${u.searchParams.toString()}`;
+  }
+  async function loadVisit() {
+    const k = visitKey();
+    const o = await chrome.storage.local.get(k);
+    state.prevTokens = o[k] && o[k].v ? new Set(o[k].v) : null;
+  }
+  async function saveVisit() {
+    const k = visitKey();
+    const all = new Set([...(state.prevTokens || []), ...state.ads.keys()]);
+    await chrome.storage.local.set({ [k]: { v: [...all].slice(-600), ts: Date.now() } });
+  }
+
   // p0..p1 = טווח ההתקדמות שמוקצה לקבוצת המודעות הזו במד הטעינה
   async function processAds(newAds, sig, p0, p1) {
     for (const ad of newAds) state.ads.set(ad.token, ad);
+    await updatePriceHistory(newAds);
     const span = p1 - p0;
     const need = [];
     for (const ad of newAds) {
@@ -415,8 +505,9 @@
       const it = await itemInfo(token);
       const cur = state.decor.get(token);
       if (it && it.km && cur) {
+        const flags = M.suspicion(bestPct(cur), it.description);
         state.decor.set(token, { ...cur, v: cur.v + 1, km: it.km, kmVerified: it.kmVerified,
-          kmFlag: M.kmFlag(it.km, cur.year, Date.now()) });
+          kmFlag: M.kmFlag(it.km, cur.year, Date.now()), desc: it.description, flags, suspect: flags.length > 0 });
         render();
       }
       bumpStats(token);
@@ -425,7 +516,7 @@
 
   function summary() {
     const shown = [...state.decor.values()].filter(passes).length;
-    return state.blocked ? 'יד 2 חסמה בקשות, נסו מאוחר יותר' : `${shown} מתוך ${state.ads.size} מודעות שנסרקו`;
+    return state.blocked ? 'יד 2 חסמה בקשות, נסו מאוחר יותר' : `${state.ads.size} מודעות נסרקו`;
   }
 
   async function scan() {
@@ -433,13 +524,14 @@
     const sig = location.href;
     if (state.sig !== sig) {
       Object.assign(state, { sig, doneSig: null, pagination: null });
-      state.ads.clear(); state.decor.clear(); state.lp.clear(); state.kmTried.clear();
+      state.ads.clear(); state.decor.clear(); state.lp.clear(); state.kmTried.clear(); state.drops.clear();
     }
     if (state.doneSig === sig) return;
     state.running = true;
     try {
       setProgress(0.03, 'קורא מודעות…');
       renderPanel();
+      if (!state.prevTokens || state.visitFor !== visitKey()) { await loadVisit(); state.visitFor = visitKey(); }
       const { ads, pagination } = await loadAds();
       if (state.sig !== sig) return;
       state.pagination = pagination;
@@ -447,6 +539,7 @@
       setProgress(0.12, `נמצאו ${ads.length} מודעות`);
       await processAds(ads, sig, 0.12, 1);
       state.doneSig = sig;
+      await saveVisit();
       endProgress(summary());
     } catch (e) {
       console.debug('מציאון: שגיאה', e);
@@ -478,6 +571,7 @@
         await processAds(M.extractAds(M.parseNextDataFromHtml(await r.text())), sig, base, base + 1 / count);
         state.nextPage = pg + 1;
       }
+      await saveVisit();
       endProgress(summary());
     } catch (e) {
       console.debug('מציאון: שגיאה', e);
@@ -488,8 +582,10 @@
     }
   }
 
-  chrome.storage.local.get('filters').then((o) => {
+  chrome.storage.local.get(['filters', 'marks']).then((o) => {
     Object.assign(filters, o.filters || {});
+    state.marks = o.marks || {};
+    rebuildDecor();
     syncSelects();
     if (panel.root) render();
   });

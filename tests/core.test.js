@@ -48,7 +48,7 @@ test('extractItem מדף מודעה', () => {
       km: 141000, kmInLastTest: 134571, isVerifiedByMt: { km: true }, dates: { createdAt: '2026-10-18T18:11:47' } } } },
   ] } } } };
   assert.deepStrictEqual(M.extractItem(item), {
-    km: 141000, kmInLastTest: 134571, kmVerified: true, createdAt: '2026-10-18T18:11:47' });
+    km: 141000, kmInLastTest: 134571, kmVerified: true, createdAt: '2026-10-18T18:11:47', description: '' });
   assert.strictEqual(M.extractItem({}), null);
 });
 
@@ -120,4 +120,30 @@ test('dealScore מעדיף הנחה עם ק״מ סביר על הנחה גדול�
   assert.strictEqual(noKm, 15);
   assert.strictEqual(M.dealScore({ year: 2019 }, now), null);
   assert.ok(M.dealScore({ pct: 12, km: 40000, year: 2019, hand: 1 }, now) > 12);
+});
+
+test('redFlags מזהה בעיות ומתעלם משלילה', () => {
+  assert.deepStrictEqual(M.redFlags('הרכב עבר תאונה קלה מאחור'), ['תאונה']);
+  assert.deepStrictEqual(M.redFlags('ללא תאונות, שמור מאוד'), []);
+  assert.deepStrictEqual(M.redFlags('לא עבר תאונה'), []);
+  assert.deepStrictEqual(M.redFlags('התחייבות מלאה בבדיקה אפשרות מימון וטרייד אין'), []);
+  assert.deepStrictEqual(M.redFlags('המחיר אחרי מקדמה של 20%'), ['ייתכן שהמחיר הוא מקדמה']);
+  assert.deepStrictEqual(M.redFlags('נמכר ללא טסט'), ['בלי טסט']);
+  assert.deepStrictEqual(M.redFlags('נזק בשלדה מתוקן'), ['פגיעת שלדה']);
+  assert.deepStrictEqual(M.redFlags(''), []);
+});
+
+test('suspicion ו-dealScore עם חשד', () => {
+  assert.deepStrictEqual(M.suspicion(37.3, ''), ['הנחה חריגה, כדאי לברר למה']);
+  assert.deepStrictEqual(M.suspicion(15, 'ללא תאונות'), []);
+  const now = Date.parse('2026-10-22T12:00:00');
+  assert.strictEqual(M.dealScore({ pct: 30, suspect: true }, now), 20);
+});
+
+test('priceDrop', () => {
+  assert.deepStrictEqual(M.priceDrop([], 69900, 74900), { amount: 5000, at: null });
+  assert.strictEqual(M.priceDrop([{ p: 70000, t: 1 }], 70000, null), null);
+  assert.deepStrictEqual(M.priceDrop([{ p: 75000, t: 1 }, { p: 70000, t: 2 }], 70000, null), { amount: 5000, at: 2 });
+  assert.strictEqual(M.priceDrop([], 0, 80000), null);
+  assert.strictEqual(M.priceDrop([], 70000, 70500), null);
 });
