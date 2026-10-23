@@ -38,7 +38,12 @@ async function onUpdate(env, update) {
   if (!m || typeof m.text !== 'string' || !m.chat) return;
   const start = /^\/start(?:\s+(\S+))?/.exec(m.text.trim());
   if (start && start[1] && CODE_RE.test(start[1])) {
-    await env.KV.put(`code:${start[1]}`, JSON.stringify({ chatId: m.chat.id, name: m.chat.first_name || '' }), { expirationTtl: 3600 });
+    try {
+      await env.KV.put(`code:${start[1]}`, JSON.stringify({ chatId: m.chat.id, name: m.chat.first_name || '' }), { expirationTtl: 3600 });
+    } catch (e) {
+      await tg(env, 'sendMessage', { chat_id: m.chat.id, text: '⚠️ תקלה בשרת של מציאון (מאגר הנתונים לא מחובר). נסו שוב מאוחר יותר.' });
+      return;
+    }
     await tg(env, 'sendMessage', { chat_id: m.chat.id, text: '✅ מחובר למציאון.\nאפשר לחזור לכרום. מעכשיו תקבלו כאן התראה כשעולה מציאה בחיפושים השמורים.' });
   } else {
     await tg(env, 'sendMessage', { chat_id: m.chat.id, text: 'כדי להתחבר, לחצו על "חיבור לטלגרם" בהגדרות של תוסף מציאון בכרום.' });
@@ -63,6 +68,28 @@ export default {
         if (!env.WEBHOOK_SECRET || url.searchParams.get('key') !== env.WEBHOOK_SECRET) return json({ ok: false, error: 'wrong key' }, 403);
         const r = await tg(env, 'setWebhook', { url: `${url.origin}/telegram`, secret_token: env.WEBHOOK_SECRET, allowed_updates: ['message'] });
         return json({ ok: !!r.ok, telegram: r.description || '' });
+      }
+
+      // אבחון: /status?key=<WEBHOOK_SECRET>. לא מחזיר סודות.
+      if (url.pathname === '/status') {
+        if (!env.WEBHOOK_SECRET || url.searchParams.get('key') !== env.WEBHOOK_SECRET) {
+          return json({ ok: false, webhookSecretSet: !!env.WEBHOOK_SECRET, error: env.WEBHOOK_SECRET ? 'wrong key' : 'WEBHOOK_SECRET חסר' }, 403);
+        }
+        const me = env.BOT_TOKEN ? await tg(env, 'getMe') : { ok: false, description: 'BOT_TOKEN חסר' };
+        const wh = me.ok ? await tg(env, 'getWebhookInfo') : null;
+        let kv = 'לא מחובר (צריך Binding בשם KV)';
+        if (env.KV) {
+          try { await env.KV.put('status:test', '1', { expirationTtl: 60 }); kv = 'תקין'; } catch (e) { kv = 'מחובר אבל נכשל: ' + e.message; }
+        }
+        const expected = `${url.origin}/telegram`;
+        const w = wh && wh.result;
+        return json({
+          bot: me.ok ? `תקין (@${me.result.username})` : `לא תקין: ${me.description || ''}`,
+          webhook: !w ? '?' : w.url === expected ? 'מחובר לשרת' : w.url ? `מחובר לכתובת אחרת: ${w.url}` : 'לא מחובר. פתחו /setup?key=...',
+          webhookLastError: (w && w.last_error_message) || '',
+          pendingUpdates: w ? w.pending_update_count : null,
+          kv,
+        });
       }
 
       if (url.pathname === '/telegram' && req.method === 'POST') {
