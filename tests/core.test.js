@@ -165,3 +165,24 @@ test('extractAds כולל שם רכב', () => {
   assert.strictEqual(ad.name, 'שברולט ספארק');
   assert.strictEqual(ad.subModelText, 'LT Plus');
 });
+
+test('peerStats ו-dealScore: גימור בסיסי זול עם ק״מ נמוך עוקף גימור יקר עם הנחה', () => {
+  const now = Date.parse('2026-10-23');
+  const ads = [
+    { price: 85000, modelId: 1, subModelId: 11, year: 2017 },
+    { price: 74000, modelId: 1, subModelId: 12, year: 2017 },
+    { price: 82000, modelId: 1, subModelId: 12, year: 2017 },
+    { price: 90000, modelId: 1, subModelId: 11, year: 2017 },
+    { price: 50000, modelId: 2, subModelId: 21, year: 2017 },
+  ];
+  const peers = M.peerStats(ads);
+  assert.strictEqual(peers.get('1/2017').median, 83500);
+  assert.strictEqual(peers.get('1/2017').n, 4);
+  assert.strictEqual(peers.has('2/2017'), false);
+  const pricey = M.dealScore({ pct: 15, pp: M.discountPct(83500, 85000), km: 120000, year: 2017, hand: 2 }, now);
+  const cheap = M.dealScore({ pct: 9.8, pp: M.discountPct(83500, 74000), km: 90000, year: 2017, hand: 1 }, now);
+  assert.ok(cheap > pricey, `${cheap} > ${pricey}`);
+  assert.strictEqual(M.dealScore({ pp: 12, year: 2017 }, now), 12);
+  const parts = M.scoreParts({ pct: 10, pp: 20, hand: 3, suspect: true }, now);
+  assert.deepStrictEqual(parts, { base: 14, km: 0, hand: -3, suspect: -10, total: 1 });
+});

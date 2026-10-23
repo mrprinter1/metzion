@@ -126,16 +126,22 @@
     return e;
   };
   const bestPct = (i) => {
+    const v = Math.max(i.pct == null ? -Infinity : i.pct, i.mp == null ? -Infinity : i.mp, i.pp == null ? -Infinity : i.pp);
+    return v === -Infinity ? null : v;
+  };
+  // הנחה ביחס לאותה רמת גימור בלבד (מחירון או חציון התת-דגם). משמשת לזיהוי הנחה חריגה.
+  const valuePct = (i) => {
     const v = Math.max(i.pct == null ? -Infinity : i.pct, i.mp == null ? -Infinity : i.mp);
     return v === -Infinity ? null : v;
   };
   const kmShort = (km) => (km >= 1000 ? `${nf.format(Math.round(km / 1000))} אלף ק״מ` : `${nf.format(km)} ק״מ`);
-  const signPct = (p) => `${p >= 0 ? '−' : '+'}${Math.abs(p)}%`;
+  const signPct = (p) => (Math.abs(p) < 0.05 ? "0%" : `${p > 0 ? "−" : "+"}${Math.abs(p)}%`);
 
   // מה מוצג כ"כותרת" של המודעה: הנחה מהמחירון, ואם אין, הנחה מהשוק.
   function headline(i) {
     if (i.pct != null && i.pct >= MIN_SHOW) return { value: `${i.pct}%`, label: 'מתחת למחירון', src: 'list' };
     if (i.mp != null && i.mp >= MIN_SHOW) return { value: `${i.mp}%`, label: 'מתחת לשוק', src: 'market' };
+    if (i.pp != null && i.pp >= MIN_SHOW) return { value: `${i.pp}%`, label: 'מתחת לדומים', src: 'peer' };
     return { value: 'חדש', label: M.formatAge(i.minutes) || '', src: 'fresh' };
   }
   function tone(i) {
@@ -339,6 +345,7 @@
     const tip = [`מחיר ${i.price > 0 ? nf.format(i.price) + ' ₪' : 'לא צוין'}`];
     if (i.listPrice) tip.push(`מחירון יד 2: ${nf.format(i.listPrice)} ₪ (${signPct(i.pct)})`);
     if (i.median) tip.push(`חציון השוק: ${nf.format(i.median)} ₪ מ-${i.mn} מודעות (${signPct(i.mp)})`);
+    if (i.peerMedian) tip.push(`חציון הדגם בשנה הזו (כל הגימורים): ${nf.format(i.peerMedian)} ₪ מ-${i.pn} מודעות (${signPct(i.pp)})`);
     if (i.km) tip.push(`${nf.format(i.km)} ק״מ${i.kmVerified ? ', מאומת במשרד התחבורה' : ''}`);
     if (i.drop) {
       const when = i.drop.at ? ` (${M.formatAge((Date.now() - i.drop.at) / 60000)})` : '';
@@ -347,8 +354,15 @@
     if (i.flags && i.flags.length) tip.push(`⚠ ${i.flags.join(' · ')}`);
     const d = M.formatDate(i.createdAt);
     if (d) tip.push(`פורסם ${d}`);
-    const sc = M.dealScore(i, Date.now());
-    if (sc != null) tip.push(`ציון משתלמות: ${sc} (הנחה, מתוקנת לפי ק״מ, יד וחשד)`);
+    const sc = M.scoreParts(i, Date.now());
+    if (sc) {
+      const sg = (x) => (x >= 0 ? `+${x}` : `${x}`);
+      const parts = [`מחיר ${sg(sc.base)}`];
+      if (i.km) parts.push(`ק״מ ${sg(sc.km)}`); else parts.push('ק״מ לא ידוע');
+      if (sc.hand) parts.push(`יד ${sg(sc.hand)}`);
+      if (sc.suspect) parts.push(`חשד ${sc.suspect}`);
+      tip.push(`ציון משתלמות: ${sc.total} (${parts.join(', ')})`);
+    }
     row.title = tip.join('\n');
 
     row.append(pill, main, actions);
@@ -422,6 +436,7 @@
   function rebuildDecor() {
     const now = Date.now();
     const market = M.marketStats([...state.ads.values()]);
+    const peers = M.peerStats([...state.ads.values()]);
     for (const [token, ad] of state.ads) {
       const prev = state.decor.get(token) || {};
       const minutes = M.minutesSince(ad.createdAt, now);
@@ -431,13 +446,16 @@
       const ms = k ? market.get(k) : null;
       const pct = M.discountPct(lp, ad.price);
       const mp = ms ? M.discountPct(ms.median, ad.price) : null;
-      const best = Math.max(pct == null ? -Infinity : pct, mp == null ? -Infinity : mp);
+      const ps = ad.modelId && ad.year ? peers.get(`${ad.modelId}/${ad.year}`) : null;
+      const pp = ps ? M.discountPct(ps.median, ad.price) : null;
+      const best = Math.max(pct == null ? -Infinity : pct, mp == null ? -Infinity : mp, pp == null ? -Infinity : pp);
       if (!(best >= MIN_SHOW) && !fresh) { state.decor.delete(token); continue; }
-      const flags = M.suspicion(best, prev.desc);
+      const flags = M.suspicion(Math.max(pct ?? -Infinity, mp ?? -Infinity), prev.desc);
       const mark = state.marks[token];
       state.decor.set(token, {
         v: (prev.v || 0) + 1, fresh, minutes, createdAt: ad.createdAt, pct, listPrice: lp,
         mp, mn: ms ? ms.n : null, median: ms ? ms.median : null,
+        pp, pn: ps ? ps.n : null, peerMedian: ps ? ps.median : null,
         year: ad.year, price: ad.price, hand: ad.hand, adType: ad.adType,
         km: prev.km, kmVerified: prev.kmVerified, kmFlag: prev.kmFlag, desc: prev.desc,
         flags, suspect: flags.length > 0,
@@ -509,7 +527,7 @@
     await updatePriceHistory(newAds);
     const span = p1 - p0;
     const need = [];
-    for (const ad of newAds) {
+    for (const ad of state.ads.values()) {
       if (!ad.price || !ad.subModelId || !ad.year) continue;
       const k = `${ad.subModelId}/${ad.year}`;
       if (!state.lp.has(k) && !need.includes(k)) need.push(k);
@@ -536,7 +554,7 @@
       const it = await itemInfo(token);
       const cur = state.decor.get(token);
       if (it && it.km && cur) {
-        const flags = M.suspicion(bestPct(cur), it.description);
+        const flags = M.suspicion(valuePct(cur), it.description);
         state.decor.set(token, { ...cur, v: cur.v + 1, km: it.km, kmVerified: it.kmVerified,
           kmFlag: M.kmFlag(it.km, cur.year, Date.now()), desc: it.description, flags, suspect: flags.length > 0 });
         render();

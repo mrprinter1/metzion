@@ -33,6 +33,7 @@
       token: ad.token,
       price: Number(ad.price) || 0,
       subModelId: ad.subModel && ad.subModel.id,
+      modelId: ad.model && ad.model.id,
       year: ad.vehicleDates && ad.vehicleDates.yearOfProduction,
       hand: ad.hand && ad.hand.id,
       createdAt: ad.createdAt,
@@ -91,17 +92,29 @@
   // ציון "הכי משתלם": ההנחה הטובה מבין מחירון/שוק, מתוקנת לפי ק"מ ויד.
   // ק"מ כפול מהצפוי מוריד 20 נקודות, חצי מהצפוי מוסיף 10. כל יד מעל הראשונה מורידה 1.5.
   // המשקלות הם הערכה לכיוונון, לא נוסחה מבוססת.
-  function dealScore(i, now) {
-    const best = Math.max(i.pct == null ? -Infinity : i.pct, i.mp == null ? -Infinity : i.mp);
-    if (best === -Infinity) return null;
-    let s = best;
+  // הציון מורכב משני מבטים על המחיר:
+  // ערך: כמה הרכב זול ביחס לרמת הגימור שלו (מחירון או חציון של אותו תת-דגם).
+  // דומים: כמה הוא זול ביחס לכל הרכבים מאותו דגם ושנה בחיפוש, בלי קשר לגימור.
+  // בלי המבט השני, גימור יקר עם הנחה יפה עוקף רכב זול יותר בגימור בסיסי.
+  function scoreParts(i, now) {
+    const val = Math.max(i.pct == null ? -Infinity : i.pct, i.mp == null ? -Infinity : i.mp);
+    const hasVal = val !== -Infinity;
+    const hasPeer = i.pp != null;
+    if (!hasVal && !hasPeer) return null;
+    const base = hasVal && hasPeer ? 0.6 * val + 0.4 * i.pp : hasVal ? val : i.pp;
+    let km = 0;
     if (i.km > 0 && i.year) {
       const r = Math.min(2.5, Math.max(0.3, i.km / expectedKm(i.year, now)));
-      s += 20 * (1 - r);
+      km = 20 * (1 - r);
     }
-    if (i.hand > 1) s -= 1.5 * (i.hand - 1);
-    if (i.suspect) s -= 10;
-    return Math.round(s * 10) / 10;
+    const hand = i.hand > 1 ? -1.5 * (i.hand - 1) : 0;
+    const suspect = i.suspect ? -10 : 0;
+    const r1 = (x) => Math.round(x * 10) / 10;
+    return { base: r1(base), km: r1(km), hand: r1(hand), suspect, total: r1(base + km + hand + suspect) };
+  }
+  function dealScore(i, now) {
+    const p = scoreParts(i, now);
+    return p ? p.total : null;
   }
 
   // מילים בתיאור שמרמזות על בעיה. neg = לבדוק שלא כתוב לפניהן "ללא", "לא עבר" וכו'.
@@ -195,6 +208,11 @@
     return out;
   }
 
+  // חציון מחירים לכל דגם ושנה, בלי קשר לתת-הדגם.
+  function peerStats(ads, minN) {
+    return marketStats(ads.map((a) => ({ price: a.price, subModelId: a.modelId, year: a.year })), minN);
+  }
+
   function extractPagination(data) {
     const q = findQuery(data, 'feed-mix');
     const p = q && q.state && q.state.data && q.state.data.pagination;
@@ -214,7 +232,7 @@
 
   const api = {
     parseNextDataFromHtml, extractAds, extractItem, extractListPrice,
-    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate, median, marketStats, extractPagination, dealScore, redFlags, suspicion, priceDrop, inQuietHours,
+    discountPct, expectedKm, kmFlag, minutesSince, pageMatchesUrl, formatAge, formatDate, median, marketStats, peerStats, extractPagination, dealScore, scoreParts, redFlags, suspicion, priceDrop, inQuietHours,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Metzion = api;
