@@ -1,9 +1,10 @@
 'use strict';
 // מציאון: בדיקה ברקע של חיפושים שמורים, והתראות (מחשב וטלגרם) על מציאות חדשות.
 // רץ רק כשכרום פתוח. כשהמחשב כבוי או ישן לא נבדק כלום, ובהדלקה הבאה מתקבל מה שעלה בינתיים.
-importScripts('core.js', 'net.js');
+importScripts('config.js', 'core.js', 'net.js');
 
 const M = globalThis.Metzion;
+const SERVER = (globalThis.MetzionConfig && globalThis.MetzionConfig.server || '').replace(/\/+$/, '');
 const BASE = 'https://www.yad2.co.il';
 const MIN_SHOW = 10;
 const MAX_SEARCHES = 3;
@@ -14,7 +15,7 @@ const PREMIUM = { alerts: true };
 const DEFAULT_SETTINGS = {
   intervalMin: 15,
   quiet: { enabled: false, from: '23:00', to: '07:00' },
-  telegram: { enabled: false, token: '', chatId: '' },
+  telegram: { enabled: false, key: '', name: '' },
 };
 
 async function getSettings() {
@@ -164,7 +165,7 @@ async function notify(hit, srch, settings) {
     contextMessage: hit.flags.length ? `⚠ ${hit.flags[0]}` : srch.title || '',
     priority: 2,
   });
-  if (settings.telegram.enabled && settings.telegram.token && settings.telegram.chatId) {
+  if (settings.telegram.enabled && settings.telegram.key) {
     const text = [
       '🚗 מציאון: מציאה חדשה',
       d.title,
@@ -184,31 +185,18 @@ chrome.notifications.onClicked.addListener((id) => {
   chrome.notifications.clear(id);
 });
 
+// טלגרם דרך השרת של מציאון. המפתח (key) מתקבל בחיבור, וה-chat id נשאר בשרת.
 async function sendTelegram(tg, text) {
+  if (!SERVER || !tg.key) return { ok: false, error: 'טלגרם לא מחובר' };
   try {
-    const r = await fetch(`https://api.telegram.org/bot${tg.token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: tg.chatId, text }),
+    const r = await fetch(`${SERVER}/notify`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: tg.key, text }),
     });
     const j = await r.json().catch(() => ({}));
-    return { ok: !!j.ok, error: j.description || (r.ok ? '' : `HTTP ${r.status}`) };
+    const errors = { not_linked: 'החיבור לטלגרם בוטל, התחברו מחדש', rate_limited: 'יותר מדי הודעות בשעה האחרונה' };
+    return { ok: !!j.ok, error: j.ok ? '' : (errors[j.error] || j.error || `HTTP ${r.status}`) };
   } catch (e) {
-    return { ok: false, error: 'אין חיבור לטלגרם' };
-  }
-}
-
-// מוצא את ה-chat id מההודעה האחרונה שנשלחה לבוט.
-async function telegramConnect(token) {
-  try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/getUpdates`);
-    const j = await r.json();
-    if (!j.ok) return { ok: false, error: j.description || 'הטוקן לא תקין' };
-    const last = [...(j.result || [])].reverse().find((u) => u.message && u.message.chat);
-    if (!last) return { ok: false, error: 'לא נמצאה הודעה. שלחו לבוט הודעה כלשהי ונסו שוב' };
-    return { ok: true, chatId: String(last.message.chat.id), name: last.message.chat.first_name || last.message.chat.title || '' };
-  } catch (e) {
-    return { ok: false, error: 'אין חיבור לטלגרם' };
+    return { ok: false, error: 'אין חיבור לשרת של מציאון' };
   }
 }
 
@@ -218,9 +206,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   switch (msg && msg.type) {
     case 'openOptions': chrome.runtime.openOptionsPage(); return false;
     case 'pollNow': return reply(pollAll(true));
-    case 'telegramConnect': return reply(telegramConnect(msg.token));
-    case 'telegramTest': return reply(getSettings().then((s) => sendTelegram({ ...s.telegram, ...(msg.telegram || {}) },
-      '✅ מציאון מחובר. מכאן תגיע התראה כשתעלה מציאה בחיפושים השמורים.')));
+    case 'telegramTest': return reply(getSettings().then((s) => sendTelegram(s.telegram,
+      '✅ הודעת בדיקה ממציאון. ככה תיראה התראה על מציאה.')));
     case 'saveSearch': return reply(saveSearch(msg.search));
     default: return false;
   }

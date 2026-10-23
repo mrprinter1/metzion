@@ -50,3 +50,10 @@ code { padding: 1px 5px; border-radius: 5px; background: var(--bg); direction: l
 .switch input:checked + span { background: var(--good); }
 .switch input:checked + span::after { transform: translateX(-18px); }
 .off { opacity: .45; pointer-events: none; }
+
+.btn.big { padding: 10px 20px; font-size: 14px; background: #229ed9; border-color: #229ed9; }
+.connected { margin: 4px 0; font-weight: 700; color: var(--strong); }
+.wait { display: flex; align-items: center; gap: 8px; color: var(--sub); }
+.spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: #229ed9; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.wait[hidden], [hidden] { display: none !important; }

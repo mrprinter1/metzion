@@ -1,6 +1,7 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
-const DEFAULTS = { intervalMin: 15, quiet: { enabled: false, from: '23:00', to: '07:00' }, telegram: { enabled: false, token: '', chatId: '' } };
+const DEFAULTS = { intervalMin: 15, quiet: { enabled: false, from: '23:00', to: '07:00' }, telegram: { enabled: false, key: '', name: '' } };
+const SERVER = ((window.MetzionConfig && window.MetzionConfig.server) || '').replace(/\/+$/, '');
 let settings = DEFAULTS;
 
 function ago(ts) {
@@ -22,22 +23,25 @@ async function load() {
   $('quietFrom').value = settings.quiet.from;
   $('quietTo').value = settings.quiet.to;
   $('tgOn').checked = settings.telegram.enabled;
-  $('tgToken').value = settings.telegram.token;
-  $('tgStatus').textContent = settings.telegram.chatId ? 'מחובר ✓' : '';
   syncDisabled();
   renderSearches(o.searches || []);
 }
 
 function syncDisabled() {
   $('quietTimes').classList.toggle('off', !$('quietOn').checked);
-  $('tgTest').disabled = !settings.telegram.chatId;
+  const linked = !!settings.telegram.key;
+  $('tgNoServer').hidden = !!SERVER;
+  $('tgOff').hidden = !SERVER || linked;
+  $('tgOnBox').hidden = !linked;
+  $('tgSwitch').hidden = !linked;
+  $('tgName').textContent = settings.telegram.name ? `(${settings.telegram.name})` : '';
 }
 
 async function save() {
   settings = {
     intervalMin: Number($('interval').value),
     quiet: { enabled: $('quietOn').checked, from: $('quietFrom').value || '23:00', to: $('quietTo').value || '07:00' },
-    telegram: { ...settings.telegram, enabled: $('tgOn').checked, token: $('tgToken').value.trim() },
+    telegram: { ...settings.telegram, enabled: $('tgOn').checked },
   };
   await chrome.storage.local.set({ settings });
   syncDisabled();
@@ -90,11 +94,6 @@ async function update(id, fn) {
 }
 
 for (const id of ['interval', 'quietOn', 'quietFrom', 'quietTo', 'tgOn']) $(id).addEventListener('change', save);
-$('tgToken').addEventListener('change', async () => {
-  settings.telegram.chatId = '';
-  $('tgStatus').textContent = '';
-  await save();
-});
 
 $('pollNow').addEventListener('click', async () => {
   $('pollNow').disabled = true;
@@ -106,27 +105,60 @@ $('pollNow').addEventListener('click', async () => {
   load();
 });
 
+// חיבור לטלגרם: קוד אקראי -> פתיחת הבוט עם הקוד -> בדיקה כל 2 שניות אם המשתמש לחץ Start.
+function randomCode() {
+  const b = new Uint8Array(12);
+  crypto.getRandomValues(b);
+  return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+let linking = null;
 $('tgConnect').addEventListener('click', async () => {
-  await save();
-  if (!settings.telegram.token) { $('tgStatus').textContent = 'הדביקו קודם את הטוקן'; return; }
-  $('tgStatus').textContent = 'מתחבר…';
-  const r = await chrome.runtime.sendMessage({ type: 'telegramConnect', token: settings.telegram.token });
-  if (r && r.ok) {
-    settings.telegram.chatId = r.chatId;
-    settings.telegram.enabled = true;
-    $('tgOn').checked = true;
-    await chrome.storage.local.set({ settings });
-    $('tgStatus').textContent = `מחובר ✓${r.name ? ' (' + r.name + ')' : ''}`;
-  } else {
-    $('tgStatus').textContent = (r && r.error) || 'החיבור נכשל';
+  if (linking) return;
+  $('tgConnect').disabled = true;
+  try {
+    const info = await fetch(`${SERVER}/info`).then((r) => r.json());
+    if (!info.ok || !info.bot) throw new Error('no bot');
+    const code = randomCode();
+    window.open(`https://t.me/${info.bot}?start=${code}`, '_blank');
+    $('tgWait').hidden = false;
+    const until = Date.now() + 3 * 60e3;
+    linking = setInterval(async () => {
+      if (Date.now() > until) return stopLinking('לא התקבל אישור. נסו שוב');
+      const r = await fetch(`${SERVER}/link?code=${code}`).then((x) => x.json()).catch(() => null);
+      if (r && r.linked) {
+        settings.telegram = { enabled: true, key: r.key, name: r.name || '' };
+        $('tgOn').checked = true;
+        await chrome.storage.local.set({ settings });
+        stopLinking('');
+      }
+    }, 2000);
+  } catch (e) {
+    stopLinking('אין חיבור לשרת של מציאון, נסו שוב מאוחר יותר');
   }
-  syncDisabled();
 });
 
+function stopLinking(msg) {
+  clearInterval(linking);
+  linking = null;
+  $('tgConnect').disabled = false;
+  $('tgWait').hidden = !msg;
+  if (msg) $('tgWait').textContent = msg;
+  syncDisabled();
+}
+
 $('tgTest').addEventListener('click', async () => {
-  $('tgTestMsg').textContent = 'שולח…';
+  $('tgMsg').textContent = 'שולח…';
   const r = await chrome.runtime.sendMessage({ type: 'telegramTest' });
-  $('tgTestMsg').textContent = r && r.ok ? 'נשלח, בדקו בטלגרם' : `לא נשלח: ${(r && r.error) || 'שגיאה'}`;
+  $('tgMsg').textContent = r && r.ok ? 'נשלח, בדקו בטלגרם' : `לא נשלח: ${(r && r.error) || 'שגיאה'}`;
+});
+
+$('tgDisconnect').addEventListener('click', async () => {
+  const key = settings.telegram.key;
+  settings.telegram = { enabled: false, key: '', name: '' };
+  await chrome.storage.local.set({ settings });
+  syncDisabled();
+  if (SERVER && key) fetch(`${SERVER}/unlink`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key }) }).catch(() => {});
 });
 
 chrome.storage.onChanged.addListener((c) => { if (c.searches) renderSearches(c.searches.newValue || []); });
