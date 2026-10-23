@@ -8,6 +8,9 @@
 // התוסף לא צריך לקרוא את המפתח בחזרה, כי KV מתעדכן בין אזורים בעיכוב של עד דקה.
 // /check משמש רק לאישור בממשק.
 
+// כתובת ליצירת קשר שמופיעה במדיניות הפרטיות (/privacy). למלא לפני פרסום בחנות.
+const CONTACT_EMAIL = '';
+
 const KEY_RE = /^[A-Za-z0-9_-]{20,64}$/;
 const MAX_PER_HOUR = 30;
 
@@ -56,6 +59,11 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
     try {
       if (url.pathname === '/health') return json({ ok: true });
+      if (url.pathname === '/privacy') {
+        return new Response(PRIVACY_HTML.replace('{{CONTACT}}', CONTACT_EMAIL ? `<a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>` : 'דרך עמוד התוסף בחנות של כרום'), {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      }
 
       // מחזיר את שם המשתמש של הבוט, כדי שהתוסף יידע איזה קישור לפתוח
       if (url.pathname === '/info') {
@@ -130,3 +138,45 @@ export default {
     }
   },
 };
+
+const PRIVACY_HTML = `<!doctype html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>מציאון · מדיניות פרטיות</title>
+<style>body{font:16px/1.6 system-ui,-apple-system,"Segoe UI",Arial,sans-serif;color:#1d1d1f;background:#f6f7f9;margin:0;padding:24px 16px}
+main{max-width:720px;margin:0 auto;background:#fff;border:1px solid #e3e5ea;border-radius:14px;padding:28px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:18px;margin:28px 0 6px}p,li{color:#33363d}.muted{color:#6b6f78;font-size:14px}</style></head>
+<body><main>
+<h1>מדיניות פרטיות · מציאון</h1>
+<p class="muted">עודכן לאחרונה: אוקטובר 2026</p>
+<p>מציאון הוא תוסף לכרום שמסמן ביד 2 רכבים שמחירם נמוך מהמחירון ומהשוק, ושולח התראות על מודעות חדשות בחיפושים ששמרתם. מציאון אינו קשור ליד 2.</p>
+
+<h2>מה נשמר במחשב שלכם בלבד</h2>
+<ul>
+<li>ההגדרות שלכם, החיפושים השמורים והסינונים.</li>
+<li>היסטוריית מחירים של מודעות שראיתם, וסימוני "נבדק" ו"הוסתר".</li>
+<li>מטמון של מחירונים ופרטי מודעות, כדי לא לטעון אותם שוב.</li>
+</ul>
+<p>המידע הזה נשמר באחסון של התוסף בדפדפן, לא נשלח אלינו ונמחק כשמסירים את התוסף.</p>
+
+<h2>הפניות ליד 2</h2>
+<p>התוסף קורא את דפי התוצאות, המחירון והמודעות ישירות מאתר יד 2, מהדפדפן שלכם, כמו שהייתם גולשים בהם בעצמכם. הבקשות לא עוברות דרכנו.</p>
+
+<h2>התראות בטלגרם (רשות)</h2>
+<p>רק אם תבחרו לחבר טלגרם, השרת של מציאון שומר:</p>
+<ul>
+<li>מפתח אקראי שהתוסף יצר, ומזהה הצ'אט שלכם בטלגרם.</li>
+<li>השם הפרטי שמופיע בחשבון הטלגרם שלכם, כדי להציג "מחובר" בהגדרות.</li>
+<li>מונה הודעות לשעה, שנמחק אחרי שעתיים, כדי למנוע שליחה מוגזמת.</li>
+</ul>
+<p>תוכן ההתראה (פרטי הרכב והקישור למודעה) עובר דרך השרת אל טלגרם ולא נשמר אצלנו. לחיצה על "ניתוק" בהגדרות מוחקת את החיבור מהשרת.</p>
+
+<h2>מה אנחנו לא עושים</h2>
+<ul>
+<li>לא אוספים היסטוריית גלישה, ולא קוראים אתרים אחרים מלבד יד 2.</li>
+<li>לא משתמשים בכלי מעקב או אנליטיקה, ולא מציגים פרסומות.</li>
+<li>לא מוכרים ולא מעבירים מידע לאף גורם. המידע משמש רק להפעלת התוסף.</li>
+</ul>
+
+<h2>יצירת קשר</h2>
+<p>שאלות על הפרטיות: {{CONTACT}}.</p>
+</main></body></html>`;
