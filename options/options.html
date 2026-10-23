@@ -67,7 +67,11 @@
       <div id="tgOff">
         <button id="tgConnect" class="btn big">חיבור לטלגרם</button>
         <p class="muted small">ייפתח טלגרם עם הבוט של מציאון. לוחצים שם על <b>Start</b> (או "התחל") וזהו.</p>
-        <p id="tgWait" class="wait" hidden><span class="spinner"></span> ממתין ללחיצה על Start בטלגרם…</p>
+        <div id="tgWait" hidden>
+          <p class="wait"><span class="spinner"></span> ממתין ללחיצה על Start בטלגרם…</p>
+          <p class="muted small">הבוט כבר ענה לכם? <button id="tgManual" class="btn ghost">הבוט ענה לי ✓</button></p>
+        </div>
+        <p id="tgErr" class="muted small" hidden></p>
       </div>
 
       <div id="tgOnBox" hidden>

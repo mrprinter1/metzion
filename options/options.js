@@ -25,6 +25,8 @@ async function load() {
   $('tgOn').checked = settings.telegram.enabled;
   syncDisabled();
   renderSearches(o.searches || []);
+  const t = settings.telegram;
+  if (SERVER && !t.key && t.pendingKey && Date.now() - (t.pendingAt || 0) < PENDING_TTL && !linking) watchLink();
 }
 
 function syncDisabled() {
@@ -105,52 +107,76 @@ $('pollNow').addEventListener('click', async () => {
   load();
 });
 
-// חיבור לטלגרם: קוד אקראי -> פתיחת הבוט עם הקוד -> בדיקה כל 2 שניות אם המשתמש לחץ Start.
-function randomCode() {
-  const b = new Uint8Array(12);
+// חיבור לטלגרם: התוסף מייצר מפתח ושולח אותו לבוט ב-Start. השרת שומר אותו,
+// והדף בודק ב-/check עד שהחיבור מאושר. המפתח הממתין נשמר כדי שרענון לא יאבד אותו.
+const PENDING_TTL = 60 * 60e3;
+function randomKey() {
+  const b = new Uint8Array(24);
   crypto.getRandomValues(b);
   return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 let linking = null;
+let linkedAt = 0;
+
+async function confirmLinked(name) {
+  const key = settings.telegram.pendingKey;
+  if (!key) return;
+  settings.telegram = { enabled: true, key, name: name || '' };
+  $('tgOn').checked = true;
+  linkedAt = Date.now();
+  await chrome.storage.local.set({ settings });
+  stopLinking('');
+}
+
+function watchLink() {
+  clearInterval(linking);
+  $('tgWait').hidden = false;
+  $('tgErr').hidden = true;
+  const until = Date.now() + 5 * 60e3;
+  const tick = async () => {
+    const key = settings.telegram.pendingKey;
+    if (!key || Date.now() > until) return stopLinking('לא התקבל אישור. אם הבוט ענה לכם, לחצו "הבוט ענה לי ✓", אחרת נסו שוב');
+    const r = await fetch(`${SERVER}/check?key=${encodeURIComponent(key)}`).then((x) => x.json()).catch(() => null);
+    if (r && r.linked) confirmLinked(r.name);
+  };
+  linking = setInterval(tick, 3000);
+  tick();
+}
+
 $('tgConnect').addEventListener('click', async () => {
-  if (linking) return;
   $('tgConnect').disabled = true;
   try {
     const info = await fetch(`${SERVER}/info`).then((r) => r.json());
     if (!info.ok || !info.bot) throw new Error('no bot');
-    const code = randomCode();
-    window.open(`https://t.me/${info.bot}?start=${code}`, '_blank');
-    $('tgWait').hidden = false;
-    const until = Date.now() + 3 * 60e3;
-    linking = setInterval(async () => {
-      if (Date.now() > until) return stopLinking('לא התקבל אישור. נסו שוב');
-      const r = await fetch(`${SERVER}/link?code=${code}`).then((x) => x.json()).catch(() => null);
-      if (r && r.linked) {
-        settings.telegram = { enabled: true, key: r.key, name: r.name || '' };
-        $('tgOn').checked = true;
-        await chrome.storage.local.set({ settings });
-        stopLinking('');
-      }
-    }, 2000);
+    const key = randomKey();
+    settings.telegram = { enabled: false, key: '', name: '', pendingKey: key, pendingAt: Date.now() };
+    await chrome.storage.local.set({ settings });
+    window.open(`https://t.me/${info.bot}?start=${key}`, '_blank');
+    watchLink();
   } catch (e) {
-    stopLinking('אין חיבור לשרת של מציאון, נסו שוב מאוחר יותר');
+    stopLinking('אין חיבור לשרת של מציאון — בדקו את האינטרנט ונסו שוב');
   }
 });
+
+$('tgManual').addEventListener('click', () => confirmLinked(''));
 
 function stopLinking(msg) {
   clearInterval(linking);
   linking = null;
   $('tgConnect').disabled = false;
-  $('tgWait').hidden = !msg;
-  if (msg) $('tgWait').textContent = msg;
+  $('tgWait').hidden = true;
+  $('tgErr').hidden = !msg;
+  $('tgErr').textContent = msg;
   syncDisabled();
 }
 
 $('tgTest').addEventListener('click', async () => {
   $('tgMsg').textContent = 'שולח…';
   const r = await chrome.runtime.sendMessage({ type: 'telegramTest' });
-  $('tgMsg').textContent = r && r.ok ? 'נשלח, בדקו בטלגרם' : `לא נשלח: ${(r && r.error) || 'שגיאה'}`;
+  if (r && r.ok) $('tgMsg').textContent = 'נשלח, בדקו בטלגרם';
+  else if (r && r.code === 'not_linked' && Date.now() - linkedAt < 2 * 60e3) $('tgMsg').textContent = 'החיבור עוד מתעדכן, נסו שוב בעוד דקה';
+  else $('tgMsg').textContent = `לא נשלח: ${(r && r.error) || 'שגיאה'}`;
 });
 
 $('tgDisconnect').addEventListener('click', async () => {

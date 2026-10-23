@@ -2,12 +2,12 @@
 // משתני סביבה: BOT_TOKEN (סוד), WEBHOOK_SECRET (סוד). חיבור KV בשם KV.
 //
 // זרימת חיבור:
-// 1. התוסף מייצר קוד אקראי ופותח t.me/<bot>?start=<code>
-// 2. המשתמש לוחץ Start, וטלגרם שולח לשרת (/telegram) את הקוד ואת ה-chat id
-// 3. התוסף שואל את /link?code=... ומקבל מפתח פרטי (key) שמייצג את השיחה
-// 4. התראות נשלחות ל-/notify עם המפתח. ה-chat id לא יוצא מהשרת.
+// 1. התוסף מייצר מפתח פרטי אקראי (key) ופותח t.me/<bot>?start=<key>
+// 2. המשתמש לוחץ Start, וטלגרם שולח לשרת (/telegram) את המפתח ואת ה-chat id, שנשמרים יחד
+// 3. התראות נשלחות ל-/notify עם המפתח. ה-chat id לא יוצא מהשרת.
+// התוסף לא צריך לקרוא את המפתח בחזרה, כי KV מתעדכן בין אזורים בעיכוב של עד דקה.
+// /check משמש רק לאישור בממשק.
 
-const CODE_RE = /^[A-Za-z0-9_-]{12,64}$/;
 const KEY_RE = /^[A-Za-z0-9_-]{20,64}$/;
 const MAX_PER_HOUR = 30;
 
@@ -37,9 +37,9 @@ async function onUpdate(env, update) {
   const m = update && update.message;
   if (!m || typeof m.text !== 'string' || !m.chat) return;
   const start = /^\/start(?:\s+(\S+))?/.exec(m.text.trim());
-  if (start && start[1] && CODE_RE.test(start[1])) {
+  if (start && start[1] && KEY_RE.test(start[1])) {
     try {
-      await env.KV.put(`code:${start[1]}`, JSON.stringify({ chatId: m.chat.id, name: m.chat.first_name || '' }), { expirationTtl: 3600 });
+      await env.KV.put(`user:${start[1]}`, JSON.stringify({ chatId: m.chat.id, name: m.chat.first_name || '', createdAt: Date.now() }));
     } catch (e) {
       await tg(env, 'sendMessage', { chat_id: m.chat.id, text: '⚠️ תקלה בשרת של מציאון (מאגר הנתונים לא מחובר). נסו שוב מאוחר יותר.' });
       return;
@@ -98,15 +98,11 @@ export default {
         return new Response('ok');
       }
 
-      if (url.pathname === '/link' && req.method === 'GET') {
-        const code = url.searchParams.get('code') || '';
-        if (!CODE_RE.test(code)) return json({ ok: false, error: 'bad code' }, 400);
-        const v = await env.KV.get(`code:${code}`, 'json');
-        if (!v) return json({ ok: true, linked: false });
-        const key = randomKey();
-        await env.KV.put(`user:${key}`, JSON.stringify({ chatId: v.chatId, name: v.name, createdAt: Date.now() }));
-        await env.KV.delete(`code:${code}`);
-        return json({ ok: true, linked: true, key, name: v.name });
+      if (url.pathname === '/check' && req.method === 'GET') {
+        const key = url.searchParams.get('key') || '';
+        if (!KEY_RE.test(key)) return json({ ok: false, error: 'bad key' }, 400);
+        const v = await env.KV.get(`user:${key}`, { type: 'json', cacheTtl: 30 });
+        return json({ ok: true, linked: !!v, name: v ? v.name : '' });
       }
 
       if (url.pathname === '/notify' && req.method === 'POST') {

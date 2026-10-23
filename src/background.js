@@ -194,7 +194,7 @@ async function sendTelegram(tg, text) {
     });
     const j = await r.json().catch(() => ({}));
     const errors = { not_linked: 'החיבור לטלגרם בוטל, התחברו מחדש', rate_limited: 'יותר מדי הודעות בשעה האחרונה' };
-    return { ok: !!j.ok, error: j.ok ? '' : (errors[j.error] || j.error || `HTTP ${r.status}`) };
+    return { ok: !!j.ok, code: j.error || '', error: j.ok ? '' : (errors[j.error] || j.error || `HTTP ${r.status}`) };
   } catch (e) {
     return { ok: false, error: 'אין חיבור לשרת של מציאון' };
   }
