@@ -135,7 +135,7 @@
     return v === -Infinity ? null : v;
   };
   const kmShort = (km) => (km >= 1000 ? `${nf.format(Math.round(km / 1000))} אלף ק״מ` : `${nf.format(km)} ק״מ`);
-  const signPct = (p) => (Math.abs(p) < 0.05 ? "0%" : `${p > 0 ? "−" : "+"}${Math.abs(p)}%`);
+  const signPct = (p) => (Math.abs(p) < 0.05 ? '0%' : `${p > 0 ? '−' : '+'}${Math.abs(p)}%`);
 
   // מה מוצג כ"כותרת" של המודעה: הנחה מהמחירון, ואם אין, הנחה מהשוק.
   function headline(i) {
