@@ -6,6 +6,8 @@
   const FRESH_MIN = 60;      // "עלתה לאחרונה" = עד שעה
   const MAX_LOOKUPS = 45;    // מקסימום שילובי תת-דגם ושנה חדשים בכל סריקה
   const MORE_PAGES = 3;      // כמה עמודים נוספים נסרקים בכל לחיצה
+  const AUTO_PAGES = 4;      // כמה עמודים נוספים נסרקים לבד, לאט, אחרי העמוד הראשון
+  const AUTO_GAP_MS = 8000;  // הפסקה בין עמוד לעמוד בסריקה האוטומטית
   const GAP_MS = 400;        // מרווח מינימלי בין בקשות, כדי לא להעמיס
   const TTL = 24 * 3600e3;
   const NEG_TTL = 3 * 3600e3;
@@ -142,7 +144,7 @@
   function headline(i) {
     if (i.pct != null && i.pct >= MIN_SHOW) return { value: `${i.pct}%`, label: 'מתחת למחירון', src: 'list' };
     if (i.mp != null && i.mp >= MIN_SHOW) return { value: `${i.mp}%`, label: 'מתחת לשוק', src: 'market' };
-    if (i.pp != null && i.pp >= MIN_SHOW) return { value: `${i.pp}%`, label: 'מתחת לדומים', src: 'peer' };
+    if (i.pp != null && i.pp >= MIN_SHOW) return { value: `${i.pp}%`, label: 'מתחת לדגם', src: 'peer' };
     return { value: 'חדש', label: M.formatAge(i.minutes) || '', src: 'fresh' };
   }
   function tone(i) {
@@ -350,7 +352,7 @@
     const tip = [`מחיר ${i.price > 0 ? nf.format(i.price) + ' ₪' : 'לא צוין'}`];
     if (i.listPrice) tip.push(`מחירון יד 2: ${nf.format(i.listPrice)} ₪ (${signPct(i.pct)})`);
     if (i.median) tip.push(`חציון השוק: ${nf.format(i.median)} ₪ מ-${i.mn} מודעות (${signPct(i.mp)})`);
-    if (i.peerMedian) tip.push(`חציון הדגם בשנה הזו (כל הגימורים): ${nf.format(i.peerMedian)} ₪ מ-${i.pn} מודעות (${signPct(i.pp)})`);
+    if (i.peerMedian) tip.push(`מחיר טיפוסי לדגם הזה בשנתון ${i.year} (כל רמות הגימור): ${nf.format(i.peerMedian)} ₪, לפי ${i.pn} מודעות (${signPct(i.pp)})`);
     if (i.km) tip.push(`${nf.format(i.km)} ק״מ${i.kmVerified ? ', מאומת במשרד התחבורה' : ''}`);
     if (i.drop) {
       const when = i.drop.at ? ` (${M.formatAge((Date.now() - i.drop.at) / 60000)})` : '';
@@ -575,6 +577,21 @@
     return state.blocked ? 'יד 2 חסמה בקשות, נסו מאוחר יותר' : `${state.ads.size} מודעות נסרקו`;
   }
 
+  // סריקה אוטומטית: עמוד אחד בכל פעם, עם הפסקה ארוכה, ורק כשהלשונית גלויה.
+  let autoTimer = null;
+  function scheduleAuto() {
+    clearTimeout(autoTimer);
+    const left = state.pagination ? state.pagination.pages - state.nextPage + 1 : 0;
+    if (!(state.autoLeft > 0) || left <= 0 || state.blocked) return;
+    const sig = state.sig;
+    autoTimer = setTimeout(() => {
+      if (state.sig !== sig || location.href !== sig) return;
+      if (document.hidden || state.running) { scheduleAuto(); return; }
+      state.autoLeft -= 1;
+      scanMore(1);
+    }, AUTO_GAP_MS);
+  }
+
   // רענון: סורקים את עמוד החיפוש מחדש. מחירונים וק״מ שכבר נשלפו נשארים במטמון.
   function rescan() {
     if (state.running || state.sig !== location.href) return;
@@ -585,6 +602,8 @@
   async function scan(fresh) {
     if (!/\/vehicles\/cars\/?$/.test(location.pathname) || state.running) return;
     const sig = location.href;
+    clearTimeout(autoTimer);
+    state.autoLeft = 0;
     if (state.sig !== sig) {
       Object.assign(state, { sig, doneSig: null, pagination: null });
       state.ads.clear(); state.decor.clear(); state.lp.clear(); state.kmTried.clear(); state.drops.clear();
@@ -609,6 +628,8 @@
       state.doneSig = sig;
       await saveVisit();
       endProgress(summary());
+      state.autoLeft = AUTO_PAGES;
+      scheduleAuto();
     } catch (e) {
       console.debug('מציאון: שגיאה', e);
       endProgress('שגיאה: ' + (e && e.message ? e.message : e));
@@ -618,14 +639,15 @@
     }
   }
 
-  async function scanMore() {
+  async function scanMore(pages) {
     if (state.running || !state.pagination) return;
+    if (!pages) state.autoLeft = 0; // לחיצה ידנית מחליפה את הסריקה האוטומטית
     const sig = state.sig;
     state.running = true;
     renderPanel();
     try {
       const first = state.nextPage;
-      const last = Math.min(state.pagination.pages, first + MORE_PAGES - 1);
+      const last = Math.min(state.pagination.pages, first + (pages || MORE_PAGES) - 1);
       const count = last - first + 1;
       for (let pg = first; pg <= last; pg++) {
         if (state.blocked || state.sig !== sig) break;
@@ -641,6 +663,7 @@
       }
       await saveVisit();
       endProgress(summary());
+      if (pages) scheduleAuto();
     } catch (e) {
       console.debug('מציאון: שגיאה', e);
       endProgress('שגיאה: ' + (e && e.message ? e.message : e));
