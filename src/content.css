@@ -109,3 +109,7 @@
 .mz-badge.mz-dim { opacity: .55; }
 
 .mz-flash { outline: 3px solid var(--mz-new, #2563eb) !important; outline-offset: -3px; border-radius: 12px; }
+.mz-refresh:disabled { cursor: default; }
+.mz-refresh.mz-spin { animation: mz-spin 0.9s linear infinite; }
+@keyframes mz-spin { to { transform: rotate(-360deg); } }
+@media (prefers-reduced-motion: reduce) { .mz-refresh.mz-spin { animation: none; opacity: 0.5; } }

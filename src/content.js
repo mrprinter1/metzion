@@ -102,12 +102,13 @@
     return info;
   }
 
-  async function loadAds() {
+  // fresh = לא לסמוך על הנתונים שבדף (רענון), אלא למשוך את העמוד מחדש מיד 2
+  async function loadAds(fresh) {
     const el = document.getElementById('__NEXT_DATA__');
     let data = null;
-    try { data = el ? JSON.parse(el.textContent) : null; } catch (e) { data = null; }
+    try { data = el && !fresh ? JSON.parse(el.textContent) : null; } catch (e) { data = null; }
     if (!data || !M.pageMatchesUrl(data, location.search)) {
-      const r = await polite(() => fetch(location.href, { credentials: 'same-origin' }));
+      const r = await polite(() => fetch(location.href, { credentials: 'same-origin', cache: fresh ? 'no-store' : 'default' }));
       data = r.ok ? M.parseNextDataFromHtml(await r.text()) : null;
     }
     state.vehiclesBuildId = (data && data.buildId) || null;
@@ -196,6 +197,10 @@
     const bell = el('button', 'mz-icon mz-bell', '🔔');
     bell.title = 'התראה על מציאות חדשות בחיפוש הזה';
     bell.addEventListener('click', () => toggleSavedSearch());
+    const refresh = el('button', 'mz-icon mz-refresh', '↻');
+    refresh.title = 'רענון: בדיקה מחדש של החיפוש';
+    refresh.setAttribute('aria-label', 'רענון');
+    refresh.addEventListener('click', () => rescan());
     const gear = el('button', 'mz-icon', '⚙');
     gear.title = 'הגדרות והתראות';
     gear.addEventListener('click', () => chrome.runtime.sendMessage({ type: 'openOptions' }));
@@ -206,7 +211,7 @@
     const collapse = el('button', 'mz-icon', '–');
     collapse.title = 'צמצום והרחבה';
     collapse.addEventListener('click', () => root.classList.toggle('mz-collapsed'));
-    head.append(brand, count, spacer, bell, filterBtn, gear, collapse);
+    head.append(brand, count, spacer, bell, filterBtn, refresh, gear, collapse);
 
     const prog = el('div', 'mz-progress');
     const fill = el('i');
@@ -243,7 +248,7 @@
 
     root.append(head, prog, seg, fl, list, foot);
     document.body.append(root);
-    Object.assign(panel, { root, count, dot, status, fill, prog, list, more, hiddenLink, bell });
+    Object.assign(panel, { root, count, dot, status, fill, prog, list, more, hiddenLink, bell, refresh });
     refreshBell();
     panel.sort = panel.sort || 'score';
     syncSelects();
@@ -401,6 +406,8 @@
     const left = state.pagination ? state.pagination.pages - state.nextPage + 1 : 0;
     panel.more.hidden = !(left > 0);
     panel.more.disabled = state.running;
+    panel.refresh.disabled = state.running;
+    panel.refresh.classList.toggle('mz-spin', state.running);
     panel.more.textContent = `עוד עמודים (${left})`;
   }
 
@@ -568,7 +575,14 @@
     return state.blocked ? 'יד 2 חסמה בקשות, נסו מאוחר יותר' : `${state.ads.size} מודעות נסרקו`;
   }
 
-  async function scan() {
+  // רענון: סורקים את עמוד החיפוש מחדש. מחירונים וק״מ שכבר נשלפו נשארים במטמון.
+  function rescan() {
+    if (state.running || state.sig !== location.href) return;
+    state.doneSig = null;
+    scan(true);
+  }
+
+  async function scan(fresh) {
     if (!/\/vehicles\/cars\/?$/.test(location.pathname) || state.running) return;
     const sig = location.href;
     if (state.sig !== sig) {
@@ -581,8 +595,13 @@
       setProgress(0.03, 'קורא מודעות…');
       renderPanel();
       if (!state.prevTokens || state.visitFor !== visitKey()) { await loadVisit(); state.visitFor = visitKey(); }
-      const { ads, pagination } = await loadAds();
+      const { ads, pagination } = await loadAds(fresh === true);
       if (state.sig !== sig) return;
+      if (fresh === true) {
+        // מוחקים את התוצאות הקודמות רק אחרי שהעמוד החדש נטען, כדי שרענון שנכשל לא ירוקן את הפאנל
+        if (!ads.length) { state.doneSig = sig; endProgress('הרענון נכשל — בדקו את החיבור ונסו שוב'); return; }
+        state.ads.clear(); state.decor.clear(); state.kmTried.clear(); state.drops.clear();
+      }
       state.pagination = pagination;
       state.nextPage = (Number(new URLSearchParams(location.search).get('page')) || 1) + 1;
       setProgress(0.12, `נמצאו ${ads.length} מודעות`);
