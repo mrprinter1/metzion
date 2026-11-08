@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "מציאון",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "description": "מוצא ביד 2 רכבים במחיר נמוך מהמחירון ומהשוק, מדרג לפי ק״מ ויד, ושולח התראות על מציאות חדשות",
   "permissions": [
     "storage",

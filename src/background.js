@@ -195,7 +195,8 @@ async function pollOne(net, srch, settings, marks) {
     found.push({
       ad, pct, mp, pp, km: it && it.km,
       kmFlag: it && it.km ? M.kmFlag(it.km, ad.year, now) : null,
-      flags: M.suspicion(best, it && it.description),
+      // "הנחה חריגה" רק ביחס לאותה רמת גימור. מול כל הדגם, גימור בסיסי זול בטבע.
+      flags: M.suspicion(Math.max(pct ?? -Infinity, mp ?? -Infinity), it && it.description),
     });
   }
   srch.seen = [...seen].slice(-500);

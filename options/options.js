@@ -42,8 +42,8 @@ async function refreshLicense() {
   if (!lic || !lic.active) {
     badge.textContent = 'לא פעיל';
     badge.className = 'premium dim';
-    const left = lic && lic.trialEnds ? Math.ceil((lic.trialEnds - Date.now()) / 864e5) : 0;
-    status.textContent = left > 0
+    const trialOver = !!(lic && lic.trialEnds && lic.trialEnds <= Date.now());
+    status.textContent = trialOver
       ? `תקופת הניסיון הסתיימה. הזינו מפתח רישיון כדי להמשיך לקבל התראות.`
       : 'ההתראות דורשות מנוי. הזינו מפתח רישיון שקיבלתם אחרי התשלום.';
     msg.textContent = '';
@@ -152,7 +152,7 @@ $('pollNow').addEventListener('click', async () => {
   const why = {
     busy: 'בדיקה כבר רצה',
     blocked: 'יד 2 חסמה בקשות, נסו בעוד שעה',
-    premium: 'אין מנוי פעיל — הזינו מפתח רישיון למעלה או המתינו לסוף הניסיון',
+    premium: 'אין מנוי פעיל — הזינו מפתח רישיון למעלה',
     quiet: 'כרגע בשעות שקט',
   };
   $('pollMsg').textContent = r && r.ok ? (r.hits ? `נמצאו ${r.hits} מציאות חדשות` : 'אין מציאות חדשות כרגע') : (why[r && r.reason] || 'הבדיקה נכשלה');
