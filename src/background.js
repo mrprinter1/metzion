@@ -9,8 +9,9 @@ const BASE = 'https://www.yad2.co.il';
 const MIN_SHOW = 10;
 const MAX_SEARCHES = 3;
 const BLOCK_PAUSE = 3600e3;
-// התראות הן פיצ'ר פרימיום. בינתיים פתוח לכולם (תקופת ניסיון). כשיהיה שרת מנויים, הבדיקה תיכנס כאן.
-const PREMIUM = { alerts: true };
+// תקופת ניסיון: כמה ימים מההתקנה הראשונה ההתראות פתוחות בלי רישיון.
+const TRIAL_DAYS = 14;
+const LICENSE_CACHE_MS = 6 * 3600e3; // בדיקת רישיון מול השרת לכל היותר כל 6 שעות
 
 const DEFAULT_SETTINGS = {
   intervalMin: 15,
@@ -28,6 +29,58 @@ async function getSettings() {
   };
 }
 
+// ---------- רישיון / ניסיון ----------
+async function ensureInstallTs() {
+  const { installTs } = await chrome.storage.local.get('installTs');
+  if (installTs) return installTs;
+  const ts = Date.now();
+  await chrome.storage.local.set({ installTs: ts });
+  return ts;
+}
+
+async function getLicenseState() {
+  const o = await chrome.storage.local.get(['licenseKey', 'licenseCache', 'installTs']);
+  const key = (o.licenseKey || '').trim();
+  const now = Date.now();
+  const installTs = o.installTs || now;
+  const trialEnds = installTs + TRIAL_DAYS * 864e5;
+  const inTrial = now < trialEnds;
+
+  // מפתח שמור + cache תקף
+  const cache = o.licenseCache;
+  if (key && cache && cache.key === key && cache.ok && (now - cache.checkedAt) < LICENSE_CACHE_MS) {
+    return { active: true, source: 'license', key, expiresAt: cache.expiresAt || null, trialEnds };
+  }
+
+  // בדיקה מול השרת (אם יש מפתח ושרת)
+  if (key && SERVER) {
+    try {
+      const r = await fetch(`${SERVER}/license/check?key=${encodeURIComponent(key)}`);
+      const j = await r.json().catch(() => ({}));
+      const ok = !!(j && j.ok && j.active);
+      const expiresAt = j.expiresAt || null;
+      await chrome.storage.local.set({
+        licenseCache: { key, ok, expiresAt, checkedAt: now, name: j.name || '' },
+      });
+      if (ok) return { active: true, source: 'license', key, expiresAt, trialEnds };
+    } catch (e) {
+      // אם השרת לא זמין אבל יש cache חיובי ישן יותר – נסמוך עליו עד יום
+      if (cache && cache.key === key && cache.ok && (now - cache.checkedAt) < 864e5) {
+        return { active: true, source: 'license-cache', key, expiresAt: cache.expiresAt || null, trialEnds };
+      }
+    }
+  }
+
+  if (inTrial) return { active: true, source: 'trial', key: key || '', expiresAt: trialEnds, trialEnds };
+  return { active: false, source: 'none', key: key || '', expiresAt: null, trialEnds };
+}
+
+async function setLicenseKey(key) {
+  const k = String(key || '').trim();
+  await chrome.storage.local.set({ licenseKey: k, licenseCache: null });
+  return getLicenseState();
+}
+
 async function ensureAlarm() {
   const s = await getSettings();
   const period = Math.max(10, Number(s.intervalMin) || 15);
@@ -35,11 +88,12 @@ async function ensureAlarm() {
   if (!cur || cur.periodInMinutes !== period) chrome.alarms.create('poll', { periodInMinutes: period, delayInMinutes: 1 });
 }
 
-chrome.runtime.onInstalled.addListener(ensureAlarm);
+chrome.runtime.onInstalled.addListener(() => { ensureInstallTs(); ensureAlarm(); });
 chrome.runtime.onStartup.addListener(ensureAlarm);
 chrome.storage.onChanged.addListener((changes) => { if (changes.settings) ensureAlarm(); });
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'poll') pollAll(false); });
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
+ensureInstallTs();
 
 // אם יש לשונית פתוחה של יד 2, הבקשה יוצאת דרכה (כמו בקשה רגילה מהדף). אחרת, ישירות מהרקע.
 async function pickFetcher() {
@@ -60,7 +114,9 @@ async function pickFetcher() {
 let polling = false;
 
 async function pollAll(force) {
-  if (polling || !PREMIUM.alerts) return { ok: false, reason: polling ? 'busy' : 'premium' };
+  if (polling) return { ok: false, reason: 'busy' };
+  const lic = await getLicenseState();
+  if (!lic.active) return { ok: false, reason: 'premium', license: lic };
   polling = true;
   try {
     const s = await getSettings();
@@ -79,7 +135,7 @@ async function pollAll(force) {
     const patch = { searches };
     if (net.st.blocked) patch.pollBlockedUntil = now + BLOCK_PAUSE;
     await chrome.storage.local.set(patch);
-    return { ok: !net.st.blocked, hits };
+    return { ok: !net.st.blocked, hits, license: lic };
   } finally {
     polling = false;
   }
@@ -108,6 +164,7 @@ async function pollOne(net, srch, settings, marks) {
 
   const seen = new Set(srch.seen || []);
   const market = M.marketStats(ads);
+  const peers = M.peerStats(ads); // חציון לפי דגם+שנה (בלי קשר לגימור) — כמו בפאנל
   const f = srch.filters || {};
   const minPct = Math.max(MIN_SHOW, Number(f.minPct) || MIN_SHOW);
   const found = [];
@@ -121,15 +178,22 @@ async function pollOne(net, srch, settings, marks) {
     const lp = await net.listPrice(ad.subModelId, ad.year);
     if (net.st.blocked) break;
     const ms = market.get(`${ad.subModelId}/${ad.year}`);
+    const ps = ad.modelId ? peers.get(`${ad.modelId}/${ad.year}`) : null;
     const pct = M.discountPct(lp, ad.price);
     const mp = ms ? M.discountPct(ms.median, ad.price) : null;
-    const best = Math.max(pct == null ? -Infinity : pct, mp == null ? -Infinity : mp);
+    const pp = ps ? M.discountPct(ps.median, ad.price) : null;
+    // כמו בפאנל: זול לפחות ב-minPct מאחד משלושת המבטים (מחירון / גימור / דגם)
+    const best = Math.max(
+      pct == null ? -Infinity : pct,
+      mp == null ? -Infinity : mp,
+      pp == null ? -Infinity : pp,
+    );
     if (!(best >= minPct)) continue;
     const it = await net.itemInfo(ad.token);
     if (net.st.blocked) break;
     if (f.maxKm && it && it.km && it.km > f.maxKm) continue;
     found.push({
-      ad, pct, mp, km: it && it.km,
+      ad, pct, mp, pp, km: it && it.km,
       kmFlag: it && it.km ? M.kmFlag(it.km, ad.year, now) : null,
       flags: M.suspicion(best, it && it.description),
     });
@@ -147,10 +211,17 @@ const nf = new Intl.NumberFormat('he-IL');
 const kmShort = (km) => (km >= 1000 ? `${nf.format(Math.round(km / 1000))} אלף ק״מ` : `${nf.format(km)} ק״מ`);
 
 function describe(hit) {
-  const { ad, pct, mp } = hit;
-  const deal = pct != null && pct >= MIN_SHOW ? `${pct}% מתחת למחירון` : `${mp}% מתחת לשוק`;
+  const { ad, pct, mp, pp } = hit;
+  let deal;
+  if (pct != null && pct >= MIN_SHOW) deal = `${pct}% מתחת למחירון`;
+  else if (mp != null && mp >= MIN_SHOW) deal = `${mp}% מתחת לשוק (גימור)`;
+  else if (pp != null && pp >= MIN_SHOW) deal = `${pp}% מתחת לדגם`;
+  else {
+    const best = Math.max(pct == null ? -Infinity : pct, mp == null ? -Infinity : mp, pp == null ? -Infinity : pp);
+    deal = best > -Infinity ? `${best}% מתחת לשוק` : '';
+  }
   const title = `${ad.name || 'רכב'} ${ad.year}${ad.hand ? ' · יד ' + ad.hand : ''}`;
-  const line = `${nf.format(ad.price)} ₪ · ${deal}`;
+  const line = `${nf.format(ad.price)} ₪` + (deal ? ` · ${deal}` : '');
   const km = hit.km ? kmShort(hit.km) + (hit.kmFlag === 'high' ? ' (גבוה)' : '') : '';
   return { title, line, km, url: `${BASE}/vehicles/item/${ad.token}` };
 }
@@ -209,6 +280,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case 'telegramTest': return reply(getSettings().then((s) => sendTelegram(s.telegram,
       '✅ הודעת בדיקה ממציאון. ככה תיראה התראה על מציאה.')));
     case 'saveSearch': return reply(saveSearch(msg.search));
+    case 'getLicense': return reply(getLicenseState());
+    case 'setLicenseKey': return reply(setLicenseKey(msg.key));
     default: return false;
   }
 });

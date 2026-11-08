@@ -50,3 +50,26 @@ https://metzion.<השם-שלכם>.workers.dev/setup?key=<WEBHOOK_SECRET>
 ## מגבלות החינם
 - Workers: 100,000 בקשות ביום.
 - KV: 1,000 כתיבות ביום (כל התראה בטלגרם היא כתיבה אחת). מספיק לבדיקה עם עשרות משתמשים. מעבר לזה, Workers Paid עולה 5$ לחודש.
+
+## רישיונות (מנויים)
+
+אחרי שסוחר משלם (ביט / סליקה), מפעילים לו מפתח:
+
+```bash
+# יצירת מפתח חדש ל-30 יום (או בלי days = ללא תפוגה)
+curl -X POST https://metzion.<השם>.workers.dev/license/activate \
+  -H 'content-type: application/json' \
+  -d '{"secret":"<WEBHOOK_SECRET>","name":"שם הסוחר","days":30,"note":"ביט 08/11"}'
+
+# או עם מפתח שבחרתם מראש
+curl -X POST .../license/activate \
+  -H 'content-type: application/json' \
+  -d '{"secret":"<WEBHOOK_SECRET>","key":"MZ-XXXX-YYYY","name":"...","days":30}'
+
+# ביטול
+curl -X POST .../license/revoke \
+  -H 'content-type: application/json' \
+  -d '{"secret":"<WEBHOOK_SECRET>","key":"MZ-XXXX-YYYY"}'
+```
+
+התוסף בודק מול `/license/check?key=...`. יש 14 ימי ניסיון מההתקנה הראשונה בלי מפתח.

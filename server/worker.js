@@ -132,6 +132,64 @@ export default {
         return json({ ok: true });
       }
 
+      // ---------- רישיונות ----------
+      // מפתח רישיון: אותיות/ספרות/-/_ באורך 12–64
+      const LIC_RE = /^[A-Za-z0-9_-]{12,64}$/;
+
+      // בדיקת רישיון (מהתוסף)
+      if (url.pathname === '/license/check' && req.method === 'GET') {
+        const key = url.searchParams.get('key') || '';
+        if (!LIC_RE.test(key)) return json({ ok: false, active: false, error: 'bad key' }, 400);
+        const lic = await env.KV.get(`license:${key}`, 'json');
+        if (!lic || !lic.active) return json({ ok: true, active: false });
+        if (lic.expiresAt && Number(lic.expiresAt) < Date.now()) {
+          return json({ ok: true, active: false, expired: true, expiresAt: lic.expiresAt });
+        }
+        return json({
+          ok: true,
+          active: true,
+          name: lic.name || '',
+          expiresAt: lic.expiresAt || null,
+          plan: lic.plan || 'premium',
+        });
+      }
+
+      // הפעלת/ביטול רישיון (רק עם WEBHOOK_SECRET) — לשימוש ידני אחרי תשלום בביט
+      // POST /license/activate  { secret, key, name?, days?, plan? }
+      // POST /license/revoke    { secret, key }
+      if (url.pathname === '/license/activate' && req.method === 'POST') {
+        const body = await req.json().catch(() => ({}));
+        if (!env.WEBHOOK_SECRET || body.secret !== env.WEBHOOK_SECRET) return json({ ok: false, error: 'forbidden' }, 403);
+        let key = String(body.key || '').trim();
+        if (!key) {
+          const b = new Uint8Array(18);
+          crypto.getRandomValues(b);
+          key = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        if (!LIC_RE.test(key)) return json({ ok: false, error: 'bad key' }, 400);
+        const days = Math.max(0, Number(body.days) || 0);
+        const expiresAt = days > 0 ? Date.now() + days * 864e5 : null;
+        const rec = {
+          active: true,
+          name: String(body.name || '').slice(0, 80),
+          plan: String(body.plan || 'premium').slice(0, 32),
+          expiresAt,
+          activatedAt: Date.now(),
+          note: String(body.note || '').slice(0, 200),
+        };
+        await env.KV.put(`license:${key}`, JSON.stringify(rec));
+        return json({ ok: true, key, ...rec });
+      }
+
+      if (url.pathname === '/license/revoke' && req.method === 'POST') {
+        const body = await req.json().catch(() => ({}));
+        if (!env.WEBHOOK_SECRET || body.secret !== env.WEBHOOK_SECRET) return json({ ok: false, error: 'forbidden' }, 403);
+        const key = String(body.key || '').trim();
+        if (!LIC_RE.test(key)) return json({ ok: false, error: 'bad key' }, 400);
+        await env.KV.delete(`license:${key}`);
+        return json({ ok: true });
+      }
+
       return json({ ok: false, error: 'not found' }, 404);
     } catch (e) {
       return json({ ok: false, error: 'server error' }, 500);

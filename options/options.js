@@ -27,7 +27,54 @@ async function load() {
   renderSearches(o.searches || []);
   const t = settings.telegram;
   if (SERVER && !t.key && t.pendingKey && Date.now() - (t.pendingAt || 0) < PENDING_TTL && !linking) watchLink();
+  refreshLicense();
 }
+
+async function refreshLicense() {
+  const badge = $('licBadge');
+  const status = $('licStatus');
+  const form = $('licForm');
+  const msg = $('licMsg');
+  if (!badge) return;
+  const lic = await chrome.runtime.sendMessage({ type: 'getLicense' });
+  form.hidden = false;
+  if (lic && lic.key) $('licKey').value = lic.key;
+  if (!lic || !lic.active) {
+    badge.textContent = 'לא פעיל';
+    badge.className = 'premium dim';
+    const left = lic && lic.trialEnds ? Math.ceil((lic.trialEnds - Date.now()) / 864e5) : 0;
+    status.textContent = left > 0
+      ? `תקופת הניסיון הסתיימה. הזינו מפתח רישיון כדי להמשיך לקבל התראות.`
+      : 'ההתראות דורשות מנוי. הזינו מפתח רישיון שקיבלתם אחרי התשלום.';
+    msg.textContent = '';
+    return;
+  }
+  if (lic.source === 'trial') {
+    const left = Math.max(0, Math.ceil((lic.trialEnds - Date.now()) / 864e5));
+    badge.textContent = `ניסיון · ${left} ימים`;
+    badge.className = 'premium';
+    status.textContent = `תקופת ניסיון פעילה (${left} ימים נותרים). אחריה צריך מפתח רישיון להתראות.`;
+  } else {
+    badge.textContent = 'מנוי פעיל';
+    badge.className = 'premium ok';
+    status.textContent = lic.expiresAt
+      ? `מנוי פעיל עד ${new Date(lic.expiresAt).toLocaleDateString('he-IL')}.`
+      : 'מנוי פעיל.';
+  }
+  msg.textContent = '';
+}
+
+$('licSave') && $('licSave').addEventListener('click', async () => {
+  const key = ($('licKey').value || '').trim();
+  $('licMsg').textContent = 'בודק…';
+  const r = await chrome.runtime.sendMessage({ type: 'setLicenseKey', key });
+  if (r && r.active) {
+    $('licMsg').textContent = r.source === 'trial' ? 'נשמר (עדיין בתקופת ניסיון)' : 'רישיון פעיל ✓';
+  } else {
+    $('licMsg').textContent = key ? 'המפתח לא תקין או שפג תוקפו' : 'המפתח נמחק';
+  }
+  refreshLicense();
+});
 
 function syncDisabled() {
   $('quietTimes').classList.toggle('off', !$('quietOn').checked);
@@ -102,7 +149,12 @@ $('pollNow').addEventListener('click', async () => {
   $('pollMsg').textContent = 'בודק…';
   const r = await chrome.runtime.sendMessage({ type: 'pollNow' });
   $('pollNow').disabled = false;
-  const why = { busy: 'בדיקה כבר רצה', blocked: 'יד 2 חסמה בקשות, נסו בעוד שעה' };
+  const why = {
+    busy: 'בדיקה כבר רצה',
+    blocked: 'יד 2 חסמה בקשות, נסו בעוד שעה',
+    premium: 'אין מנוי פעיל — הזינו מפתח רישיון למעלה או המתינו לסוף הניסיון',
+    quiet: 'כרגע בשעות שקט',
+  };
   $('pollMsg').textContent = r && r.ok ? (r.hits ? `נמצאו ${r.hits} מציאות חדשות` : 'אין מציאות חדשות כרגע') : (why[r && r.reason] || 'הבדיקה נכשלה');
   load();
 });
